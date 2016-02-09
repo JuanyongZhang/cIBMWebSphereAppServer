@@ -2,6 +2,11 @@
 
 PowerShell CmdLets and Class-Based DSC resources to manage IBM WebSphere Application Server (WAS) on Windows Environments.
 
+To get started using this module just type the command below and the module will be downloaded from [PowerShell Gallery](https://www.powershellgallery.com/packages/cIBMWebSphereAppServer/)
+```shell
+PS> Install-Module -Name cIBMWebSphereAppServer
+```
+
 **Coming Soon:** _Profile generation and WSAdmin CmdLets_ Subscribe to this repo to get notified.
 
 ## Resources
