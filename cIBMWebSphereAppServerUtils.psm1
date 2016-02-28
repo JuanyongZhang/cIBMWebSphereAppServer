@@ -2,18 +2,18 @@
 ########                               IBM WebSphere App Server CmdLets                              #########
 ##############################################################################################################
 
-# Import external modules/cmdlets
-if (!(Get-Module "cIBMInstallationManager")) {
-    ## Load it nested
-    Import-Module "cIBMInstallationManager" -ErrorAction Stop
-}
-
 enum WASEdition {
     Base
     ND
     Express
     Developer
     Liberty
+}
+
+enum StartupType {
+    Automatic
+    Manual
+    Disabled
 }
 
 # Global Variables / Resource Configuration
@@ -329,4 +329,185 @@ Function Install-IBMWebSphereAppServer() {
         -SourcePath $SourcePath -SourcePathCredential $SourcePathCredential -ErrorAction Stop
 
     Return $installed
+}
+
+##############################################################################################################
+# New-IBMWebSphereAppServerWindowsService
+#   Creates a new windows service for starting/stopping the WAS server specified, returns the display name of
+#   the service created
+##############################################################################################################
+Function New-IBMWebSphereAppServerWindowsService() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    param (
+        [parameter(Mandatory = $true, position=0)]
+		[System.String]
+		$ProfilePath,
+        
+        [parameter(Mandatory = $true, position=1)]
+		[System.String]
+		$ServerName,
+        
+        [parameter(Mandatory=$false,position=2)]
+        [WASEdition]
+        $WASEdition = [WASEdition]::Base,
+        
+        [parameter(Mandatory = $false, position=3)]
+        [System.Management.Automation.PSCredential]
+        $WebSphereAdministratorCredential,
+        
+        [parameter(Mandatory=$false,position=4)]
+        [StartupType]
+        $StartupType = [StartupType]::Manual,
+        
+        [parameter(Mandatory = $false, position=5)]
+		[System.String]
+		$ProfileLogRoot,
+        
+        [parameter(Mandatory = $false, position=6)]
+        [System.Management.Automation.PSCredential]
+        $WindowsServiceAccount
+	)
+    
+    $svcName = $null
+    if (!(Test-Path($ProfilePath) -PathType Container)) {
+        Write-Error "Invalid WebSphere Profile Path: $ProfilePath"
+        Return $null
+    }
+    try {
+        $appServerHome = Get-IBMWebSphereAppServerInstallLocation -WASEdition $WASEdition
+        $wasSvcExePath = Join-Path -Path $appServerHome -ChildPath "\bin\WASService.exe"
+        if (Test-Path($wasSvcExePath) -PathType Leaf) {
+            # Attempt to get service status
+            $wasSvcArgs = @('-status', $ServerName)
+            $wasSvcProcess = Invoke-ProcessHelper -ProcessFileName $wasSvcExePath -ProcessArguments $wasSvcArgs
+            $createService = $false
+            if ($wasSvcProcess) {
+                [string] $output = $wasSvcProcess.StdOut
+                if ($output.IndexOf("The specified service does not exist") -ge 0) {
+                    $createService = $true
+                } else {
+                    Write-Warning "Unable to create new windows service for the WAS server named: $ServerName, it already exists"
+                }
+            }
+            if ($createService) {
+                # Create Service
+                $wasSvcArgs = @('-add', $ServerName, '-serverName', $ServerName, '-profilePath', $ProfilePath)
+        
+                $wasSvcStopArgs = @()
+                if ($WebSphereAdministratorCredential -ne $null) {
+                    [string]$wasAdminUsr = $WebSphereAdministratorCredential.UserName
+                    [string]$wasAdminPwd = $WebSphereAdministratorCredential.GetNetworkCredential().Password
+                    $wasSvcStopArgs = '"-user ' + $wasAdminUsr + ' -password ' + $wasAdminPwd + '"'
+                    $wasSvcArgs += ('-stopArgs', $wasSvcStopArgs, '-encodeParams')
+                }
+                if ($WindowsServiceAccount -ne $null) {
+                    [string]$svcAccUsr = $WindowsServiceAccount.UserName
+                    [string]$svcAccPwd = $WindowsServiceAccount.GetNetworkCredential().Password
+                    $wasSvcArgs += ('-userid', $svcAccUsr, '-password', $svcAccPwd)
+                }
+                if ($ProfileLogRoot -and (Test-Path($ProfileLogRoot) -PathType Container)) {
+                    $wasSvcArgs += ('-logRoot', $ProfileLogRoot)
+                }
+                if ($StartupType -ne $null) {
+                    $wasSvcArgs += ('-startType', ($StartupType.ToString().ToLower()))
+                }
+                $wasSvcProcess = Invoke-ProcessHelper -ProcessFileName $wasSvcExePath -ProcessArguments $wasSvcArgs
+                if ($wasSvcProcess -and ($wasSvcProcess.ExitCode -eq 0)) {
+                    [string] $output = $wasSvcProcess.StdOut
+                    if ($output.IndexOf("service successfully added") -gt 0) {
+                        $svcNameStartIdx = $output.IndexOf("IBM WebSphere Application Server")
+                        $svcNameLen = ($output.IndexOf("service successfully added") - $svcNameStartIdx - 1)
+                        $svcName = ($output.Substring($svcNameStartIdx, $svcNameLen)).Trim()
+                    } else {
+                        Write-Error "An issue occurred while creating the windows service, output did not include that the service was successfully added: $output"
+                    }
+                } else {
+                    $errorMsg = (&{if($wasSvcProcess) {$wasSvcProcess.StdOut} else {$null}})
+                    Write-Error "An issue occurred while creating the windows service, WASService.exe returned: $errorMsg"
+                }
+            }
+        } else {
+            Write-Error "Unable to locate the WASService.exe file: $wasSvcExePath"
+        }
+    } catch {
+        $ErrorMessage = $_.Exception.Message
+        Write-Error "An issue occurred while creating the windows service: $ErrorMessage"
+    }
+    
+    Return $svcName
+}
+
+##############################################################################################################
+# Get-IBMWebSphereTopology
+#   Returns the WebSphere Topology for the profile specified
+##############################################################################################################
+Function Get-IBMWebSphereTopology() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    param (
+        [parameter(Mandatory = $true,position=0)]
+		[System.String]
+		$ProfilePath
+	)
+    
+    $WasCells = @{}
+    if (!(Test-Path($ProfilePath) -PathType Container)) {
+        Write-Error "Invalid WebSphere Profile Path: $ProfilePath"
+        Return $null
+    }
+    try {
+        Get-ChildItem -Path (Join-Path -Path $ProfilePath -ChildPath "\config\cells\") | ForEach-Object {
+            $WasNodes = @{}
+            Get-ChildItem -Path (Join-Path $_.FullName -ChildPath "\nodes\") | ForEach-Object {
+                $WasServers = @()
+                Get-ChildItem -Path (Join-Path $_.FullName -ChildPath "\servers\") | ForEach-Object {
+                    $WasServers += $_.BaseName
+                }
+                $WasNodes.Add($_.BaseName, $WasServers)
+            }
+            $WasCells.Add($_.BaseName, $WasNodes)
+        }
+    } catch {
+        Write-Error "Invalid WebSphere Profile Path: $ProfilePath"
+    }
+    
+    Return $WasCells
+}
+
+##############################################################################################################
+# Test-IBMWebSphereTopology
+#   Returns true if the topology verification is successful
+##############################################################################################################
+Function Test-IBMWebSphereTopology() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    param (
+        [parameter(Mandatory = $true, position=0)]
+		[System.String]
+		$ProfilePath,
+        
+        [parameter(Mandatory = $true, position=1)]
+		[System.String]
+		$CellName,
+        
+        [parameter(Mandatory = $true, position=2)]
+		[System.String]
+		$NodeName,
+        
+        [parameter(Mandatory = $true, position=3)]
+		[System.String[]]
+		$ServerName
+	)
+    
+    $TopologyExists = $false
+    $WasCells = Get-WebSphereTopology $ProfilePath -ErrorAction Stop
+    
+    if ($WasCells.ContainsKey($CellName)) {
+        if ($WasCells.$CellName.ContainsKey($NodeName)) {
+            $nodeServers = $WasCells.$CellName[$NodeName]
+            if ((Compare-Object $nodeServers $ServerName | where {$_.SideIndicator -eq "=>"}).InputObject.Count -eq 0) {
+                $TopologyExists = $true
+            }
+        }
+    }
+    
+    Return $TopologyExists
 }

@@ -9,7 +9,7 @@
 RootModule = 'cIBMWebSphereAppServer.psm1'
 
 # Version number of this module.
-ModuleVersion = '1.0.0'
+ModuleVersion = '1.0.1'
 
 # ID used to uniquely identify this module
 GUID = '325e1620-53fc-43bd-8380-80f702c2e8c0'
@@ -42,7 +42,7 @@ ProcessorArchitecture = 'None'
 PowerShellVersion = '5.0'
 
 # Modules that must be imported into the global environment prior to importing this module
-RequiredModules = @('cIBMInstallationManager')
+RequiredModules = @(@{ ModuleName = 'cIBMInstallationManager'; ModuleVersion = '1.0.2'})
 
 # Name of the Windows PowerShell host required by this module
 # PowerShellHostName = ''
@@ -89,19 +89,19 @@ PrivateData = @{
     PSData = @{
 
         # Tags applied to this module. These help with module discovery in online galleries.
-        # Tags = @()
+        Tags = @('IBM', 'WebSphereAppServer', 'WebSphere')
 
         # A URL to the license for this module.
-        # LicenseUri = ''
+        LicenseUri = 'https://raw.githubusercontent.com/dennypc/cIBMWebSphereAppServer/master/LICENSE'
 
         # A URL to the main website for this project.
-        # ProjectUri = ''
+        ProjectUri = 'https://github.com/dennypc/cIBMWebSphereAppServer/'
 
         # A URL to an icon representing this module.
         # IconUri = ''
 
         # ReleaseNotes of this module
-        # ReleaseNotes = ''
+        ReleaseNotes = 'Added topology cmdlets and cmdlet to create windows services for WAS servers'
 
     } # End of PSData hashtable
 

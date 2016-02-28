@@ -1,12 +1,6 @@
 # Import IBM WebSphere App Server Utils Module
 Import-Module $PSScriptRoot\cIBMWebSphereAppServerUtils.psm1 -ErrorAction Stop
 
-# Import external modules/cmdlets
-if (!(Get-Module "cIBMInstallationManager")) {
-    ## Load it nested
-    Import-Module "cIBMInstallationManager" -ErrorAction Stop
-}
-
 enum Ensure {
     Absent
     Present
