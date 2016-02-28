@@ -34,9 +34,10 @@ If you create your own Response File template it is expected that the template h
 DSC Resource or by leveraging the [x7Zip DSC Module](https://www.powershellgallery.com/packages/x7Zip/ "x7Zip at PowerShell Gallery")
 
 ## Versions
-
+### 1.0.1
+* Adds topology cmdlets and cmdlet to create windows services for WAS servers
+    
 ### 1.0.0
-
 * Initial release with the following resources 
     - cIBMWebSphereAppServer
 
