@@ -28,12 +28,29 @@ PS> Install-Module -Name cIBMWebSphereAppServer
 _Note_ InstallMediaConfig and ResponseFileTemplate are useful parameters when there's no built-in support for the WAS edition you need to install or when you have special requirements based on how your media is setup or maybe you have unique response file template needs.
 If you create your own Response File template it is expected that the template has the variables: **sharedLocation** and **wasInstallLocation**.  See sample response file template before when planning to roll out your own.
 
+### cIBMWebSphereAppServerFixpack
+
+* **Ensure**: (Required) Ensures that WAS fixpack is Present or Absent on the machine.
+* **Version**: (Key) The version of WAS fixpack to install
+* **WASEdition**: (Key) The edition of WAS.  Options: BASE, ND, EXPRESS, DEVELOPER, LIBERTY
+* **WebSphereInstallationDirectory**: Directory where AppServer is installed.  Default: C:\IBM\WebSphere\AppServer.
+* **SourcePath**: _array_ UNC or local file path to the fixpack zip-files.  Supports multiple file paths.
+* **SourcePathCredential**: (Optional) Credential to be used to map sourcepath if a remote share is being specified.
+
 ## Depedencies
 * [cIBMInstallationManager](http://github.com/dennypc/cIBMInstallationManager) DSC Resource/CmdLets for IBM Installation Manager
 * [7-Zip](http://www.7-zip.org/ "7-Zip") needs to be installed on the target machine.  You can add 7-Zip to your DSC configuration by using the Package
 DSC Resource or by leveraging the [x7Zip DSC Module](https://www.powershellgallery.com/packages/x7Zip/ "x7Zip at PowerShell Gallery")
 
 ## Versions
+
+### 1.0.2
+* New DSC Resource for installing fixpacks **cIBMWebSphereAppServerFixpack**
+* Adds wsadmin cmdlets (includes IBM's [wsadminlib.py](https://github.com/wsadminlib/wsadminlib) which can be added as a module dependency to wsadmin jython scripts)
+* Adds Property-Based Config cmdlets
+* Depends on cIBMInstallationManager v1.0.4 or above
+* New CmdLets: **Install-IBMWebSphereAppServerFixpack**, **Invoke-WsAdmin**, **Set-WsAdminTempDir**, **Get-WsAdminTempDir**, **Import-IBMWebSpherePropertyBasedConfig**, **Export-IBMWebSpherePropertyBasedConfig**, **Test-IBMWebSpherePropertyBasedConfig**, **Get-IBMWebSpherePropertyBasedConfig**
+
 ### 1.0.1
 * Adds topology cmdlets and cmdlet to create windows services for WAS servers
     
@@ -105,6 +122,15 @@ Configuration WASND
         Version = '8.5.5'
         SourcePath = 'C:\Media\WASND855\'
         DependsOn= '[cIBMInstallationManager]IIMInstall'
+    }
+    cIBMWebSphereAppServerFixpack WASFixpackInstall
+    {
+        Ensure = 'Present'
+        WASEdition = 'ND'
+        WebSphereInstallationDirectory = 'C:\IBM\WebSphere\AppServer'
+        Version = '8.5.5.6'
+        SourcePath = @('C:\Media\WAS855_FP\8.5.5-WS-WAS-FP0000006-part1.zip', 'C:\Media\WAS855_FP\8.5.5-WS-WAS-FP0000006-part2.zip')
+        DependsOn= '[cIBMWebSphereAppServer]WASNDInstall'
     }
 }
 WASND

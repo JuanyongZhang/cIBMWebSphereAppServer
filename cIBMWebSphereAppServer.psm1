@@ -162,3 +162,118 @@ class cIBMWebSphereAppServer {
         return $returnValue
     }
 }
+
+[DscResource()]
+class cIBMWebSphereAppServerFixpack {
+    [DscProperty(Mandatory)]
+    [Ensure] $Ensure
+    
+    [DscProperty(Key)]
+    [WASEdition] $WASEdition
+    
+    [DscProperty(Key)]
+    [String] $Version
+    
+    [DscProperty()]
+    [String] $WebSphereInstallationDirectory = "C:\IBM\WebSphere\"
+    
+    [DscProperty()]
+    [String[]] $SourcePath
+    
+    [DscProperty()]
+    [System.Management.Automation.PSCredential] $SourcePathCredential
+
+    <#
+        Installs IBM WebSphere Application Server Fixpack
+    #>
+    [void] Set () {
+        try {
+            if ($this.Ensure -eq [Ensure]::Present) {
+                Write-Verbose -Message "Starting installation of IBM WAS Fixpack"
+                $sevenZipExe = Get-SevenZipExecutable
+                if (!([string]::IsNullOrEmpty($sevenZipExe)) -and (Test-Path($sevenZipExe))) {
+                    $versionObj = (New-Object -TypeName System.Version -ArgumentList $this.Version)
+                    $installed = Install-IBMWebSphereAppServerFixpack -Version $versionObj `
+                        -WASEdition $this.WASEdition -WebSphereInstallationDirectory $this.WebSphereInstallationDirectory `
+                        -SourcePath $this.SourcePath -SourcePathCredential $this.SourcePathCredential
+                    if ($installed) {
+                        Write-Verbose ("IBM WAS Fixpack " + $this.Version + "Installed Successfully")
+                    } else {
+                        Write-Error "Unable to install the IBM WAS Fixpack, please check installation logs for more information"
+                    }
+                } else {
+                    Write-Error "IBM WAS Fixpack installation depends on 7-Zip, please ensure 7-Zip is installed first"
+                }
+            } else {
+                Write-Verbose "Uninstalling IBM WAS Fixpack (Not Yet Implemented)"
+            }
+        } catch {
+            Write-Error -ErrorRecord $_ -ErrorAction Stop
+        }
+    }
+
+    <#
+        Performs test to check if WAS fixpack is alreay installed
+    #>
+    [bool] Test () {
+        Write-Verbose "Checking for IBM WAS Fixpack installation"
+        $wasConfiguredCorrectly = $false
+        $wasRsrc = $this.Get()
+        
+        if (($wasRsrc.Ensure -eq $this.Ensure) -and ($wasRsrc.Ensure -eq [Ensure]::Present)) {
+            if ($wasRsrc.Version -eq $this.Version) {
+                if (((Get-Item($wasRsrc.WebSphereInstallationDirectory)).Name -eq 
+                    (Get-Item($this.WebSphereInstallationDirectory)).Name) -and (
+                    (Get-Item($wasRsrc.WebSphereInstallationDirectory)).Parent.FullName -eq 
+                    (Get-Item($this.WebSphereInstallationDirectory)).Parent.FullName)) {
+                    if ($wasRsrc.WASEdition -eq $this.WASEdition) {
+                        Write-Verbose "IBM WAS Fixpack is installed"
+                        $wasConfiguredCorrectly = $true
+                    }
+                }
+            }
+        } elseif (($wasRsrc.Ensure -eq $this.Ensure) -and ($wasRsrc.Ensure -eq [Ensure]::Absent)) {
+            $wasConfiguredCorrectly = $true
+        }
+
+        if (!($wasConfiguredCorrectly)) {
+            Write-Verbose "IBM WAS Fixpack not configured correctly"
+        }
+        
+        return $wasConfiguredCorrectly
+    }
+
+    <#
+        Leverages versionInfo.bat to get installed fixpack
+    #>
+    [cIBMWebSphereAppServerFixpack] Get () {
+        $RetEnsure = [Ensure]::Absent
+        $RetVersion = $null
+        $RetWASEdition = $this.WASEdition
+        
+        $versionObj = (New-Object -TypeName System.Version -ArgumentList $this.Version)
+        $RetInsDir = Get-IBMWebSphereAppServerInstallLocation $this.WASEdition $versionObj
+        
+        if($RetInsDir -and (Test-Path($RetInsDir))) {
+            $VersionInfo = Get-IBMWebSphereProductVersionInfo $RetInsDir
+            $ibmwasEdition = $this.WASEdition.ToString()
+            if($VersionInfo -and ($VersionInfo.Products) -and ($VersionInfo.Products[$ibmwasEdition])) {
+                $RetEnsure = [Ensure]::Present
+                $RetVersion = $VersionInfo.Products[$ibmwasEdition].Version
+            } else {
+                Write-Warning "Unable to retrieve version information from the IBM WebSphere Application Server installed"
+            }
+        } else {
+            Write-Verbose "IBM WebSphere Application Server is NOT Present"
+        }
+
+        $returnValue = @{
+            WebSphereInstallationDirectory = $RetInsDir
+            Version = $RetVersion
+            WASEdition = $RetWASEdition
+            Ensure = $RetEnsure
+        }
+
+        return $returnValue
+    }
+}

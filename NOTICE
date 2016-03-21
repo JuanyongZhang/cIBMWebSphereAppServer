@@ -1,0 +1,11 @@
+   =========================================================================
+   ==  NOTICE file for use with the Apache License, Version 2.0,          ==
+   =========================================================================
+
+   cIBMWebSphereAppServer
+   Copyright 2016-2017 Denny Pichardo
+   
+   Wsadmin library is provided by the wsadminlib.py file, which is open 
+   source software, and copyright by IBM corp. The original software is
+   available from
+      https://github.com/wsadminlib/wsadminlib

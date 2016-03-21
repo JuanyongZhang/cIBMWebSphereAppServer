@@ -16,6 +16,12 @@ enum StartupType {
     Disabled
 }
 
+enum PBCFilter {
+    All
+    NO_SUBTYPES
+    SELECTED_SUBTYPES
+}
+
 # Global Variables / Resource Configuration
 $IBM_REGPATH = "HKLM:\Software\IBM\"
 $IBM_REGPATH_64 = "HKLM:\Software\Wow6432Node\IBM\"
@@ -332,6 +338,52 @@ Function Install-IBMWebSphereAppServer() {
 }
 
 ##############################################################################################################
+# Install-IBMWebSphereAppServerFixpack
+#   Installs IBM WebSphere Application Server Fixpack
+##############################################################################################################
+Function Install-IBMWebSphereAppServerFixpack() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    param (
+        [parameter(Mandatory=$false)]
+        [WASEdition]
+        $WASEdition = [WASEdition]::Base,
+
+        [parameter(Mandatory=$false)]
+        [System.Version]
+        $Version = "8.5.0.0",
+        
+        [parameter(Mandatory = $true)]
+		[System.String]
+    	$WebSphereInstallationDirectory,
+
+    	[parameter(Mandatory = $true)]
+		[System.String[]]
+		$SourcePath,
+
+        [System.Management.Automation.PSCredential]
+		$SourcePathCredential
+	)
+    
+    [string] $productId = $null
+    if (($WASEdition -eq [WASEdition]::ND) -and ($Version.ToString(2) -eq "8.5")) {
+        $productId = "com.ibm.websphere.ND.v85"
+    } else {
+        Write-Error "Fixpack version not supported at this time"
+    }
+    
+    [bool] $updated = $false
+    [string] $appServerDir = $WebSphereInstallationDirectory
+    if (!((Split-Path $appServerDir -Leaf) -eq "AppServer")) {
+        $appServerDir = Join-Path -Path $appServerDir -ChildPath "AppServer"
+    }
+    
+    $updated = Install-IBMProductViaCmdLine -ProductId $productId -InstallationDirectory $appServerDir `
+        -SourcePath $SourcePath -SourcePathCredential $SourcePathCredential -ErrorAction Stop
+
+    Return $updated
+}
+
+##############################################################################################################
 # New-IBMWebSphereAppServerWindowsService
 #   Creates a new windows service for starting/stopping the WAS server specified, returns the display name of
 #   the service created
@@ -510,4 +562,507 @@ Function Test-IBMWebSphereTopology() {
     }
     
     Return $TopologyExists
+}
+
+##############################################################################################################
+# Invoke-WsAdmin
+#   Wrapper function for wsadmin scripts, supports script files or commands.
+##############################################################################################################
+Function Invoke-WsAdmin() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [Parameter(Mandatory=$true,position=0)]
+        [String]
+        $ProfilePath,
+
+        [Parameter(Mandatory=$false,position=1)]
+        [String]
+        $ScriptPath = $null,
+
+        [Parameter(Mandatory=$false,position=2)]
+        [String[]]
+        $Commands = $null,
+        
+        [Parameter(Mandatory=$false,position=3)]
+        [String[]]
+        $Arguments = @(),
+        
+        [Parameter(Mandatory=$false,position=4)]
+        [String[]]
+        $ModulesPaths = @(),
+
+        [Parameter(Mandatory=$false,position=5)]
+        [System.Management.Automation.PSCredential]
+        $WebSphereAdministratorCredential,
+        
+        [Parameter(Mandatory=$false,position=6)]
+        [ValidateSet('jython', 'jacl')]
+        [String]
+        $Lang = 'jython',
+        
+        [parameter(Mandatory=$false,position=7)]
+        [String]
+        $OutputFilter = 'WASX',
+        
+        [switch]
+        $DiscardStandardOut,
+
+        [switch]
+        $DiscardStandardErr
+    )
+
+    [string] $wsAdminBat = Join-Path -Path $ProfilePath -ChildPath "bin\wsadmin.bat"
+    [PSCustomObject] $wsAdminProcess = @{
+        StdOut = $null
+        StdErr = $null
+        ExitCode = $null
+    }
+    if (Test-Path($wsAdminBat)) {
+        [string[]] $wsArgs = $null
+        if (($Commands -ne $null) -and ($Commands.Count -gt 0)) {
+            $wsArgs = @("-lang", $Lang)
+            Foreach ($wsAdminCmd in $Commands) {
+                $wsArgs += @("-c", ('"' + $wsAdminCmd + '"'))
+            }
+        } elseif ($ScriptPath -ne $null) {
+            $wsArgs = @("-lang", $Lang, "-f", ('"' + $ScriptPath + '"'))
+            if ($Lang -eq 'jython') {
+                # Add script path to python paths to load modules defined on the same location
+                $ModulesPaths += Split-Path($ScriptPath)
+            }
+        }
+        if ($wsArgs -ne $null) {
+            # Add credentials
+            if ($WebSphereAdministratorCredential) {
+                $wasUserName = $WebSphereAdministratorCredential.UserName
+                $wasPwd = $WebSphereAdministratorCredential.GetNetworkCredential().Password
+                $wsArgs += @("-user", $wasUserName, "-password", $wasPwd)
+            }
+            # Add modules paths for jython scripts
+            if (($Lang -eq 'jython') -and ($ModulesPaths.Count -gt 0)) {
+                $jythonPathsStr = $ModulesPaths -join ';' -replace '\\','/'
+                $wsArgs += ('-javaoption "-Dpython.path=' + $jythonPathsStr + '"')
+            }
+            
+            # Add arguments if specified
+            if ($Arguments.Count -gt 0) {
+                Foreach ($wsadminArg in $Arguments) {
+                    $wsArgs += ('"' + $wsadminArg + '"')
+                }
+            }
+            $wsArgs | Out-Host
+            $discStdOut = $DiscardStandardOut.IsPresent
+            $discStdErr = $DiscardStandardErr.IsPresent
+            $wsAdminProcess = Invoke-ProcessHelper -ProcessFileName $wsAdminBat -ProcessArguments $wsArgs `
+                                -WorkingDirectory (Split-Path($wsAdminBat)) -DiscardStandardOut:$discStdOut -DiscardStandardErr:$discStdErr -Verbose
+            if ($wsAdminProcess -and (!($wsAdminProcess.StdErr)) -and ($wsAdminProcess.ExitCode -eq 0)) {
+                $exceptions = Select-String -InputObject $wsAdminProcess.StdOut -Pattern "Exception" -AllMatches
+                $success = ($exceptions.Matches.Count -eq 0)
+                if ($success -and (!([string]::IsNullOrEmpty($OutputFilter)))) {
+                    $filteredOutput = $null
+                    ($wsAdminProcess.StdOut -split [environment]::NewLine) | ? {
+                        if (!([string]$_).Contains($OutputFilter)) {
+                            $filteredOutput += $_
+                        }
+                    }
+                    if ($filteredOutput) {
+                        $wsAdminProcess.StdOut = $filteredOutput
+                    }
+                } else {
+                    if (!($success)) {
+                        $errorMsg = (&{if($wsAdminProcess) {$wsAdminProcess.StdOut} else {$null}})
+                        Write-Error "An exception occurred while executing the wsadmin.bat process: $errorMsg"
+                    }
+                }
+            } else {
+                $errorMsg = $null
+                if ($wsAdminProcess -and $wsAdminProcess.StdErr) {
+                    $errorMsg = $wsAdminProcess.StdErr
+                } else {
+                    $errorMsg = $wsAdminProcess.StdOut
+                }
+                $exitCode = (&{if($wsAdminProcess) {$wsAdminProcess.ExitCode} else {$null}})
+                Write-Error "An error occurred while executing the wsadmin.bat process. ExitCode: $exitCode Mesage: $errorMsg"
+            }
+        } else {
+            Write-Error "Invalid parameters.  You must specify either a Jython File Path or Jython Commands"
+        }
+    } else {
+        Write-Error "Unable to locate wsadmin.bat using: $wsAdminBat"
+    }
+    Return $wsAdminProcess
+}
+
+##############################################################################################################
+# Set-WsAdminTempDir
+#   Updates the temporary directory that wsadmin scripts use
+##############################################################################################################
+Function Set-WsAdminTempDir() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [parameter(Mandatory=$true,position=0)]
+        [string]
+        $ProfilePath,
+        
+        [parameter(Mandatory=$true,position=1)]
+        [string]
+        $TempDir
+    )
+    [bool] $success = $false
+    if ((Test-Path($TempDir)) -and (Test-Path($ProfilePath))) {
+        $wsadminPropsPath = Join-Path -Path $ProfilePath -ChildPath "properties\wsadmin.properties"
+        if (Test-Path $wsadminPropsPath) {
+            [hashtable] $wsadminProp = @{}
+            $wsadminProp.Add("com.ibm.ws.scripting.tempdir", ($TempDir -replace "\\","/"))
+            Write-Verbose "Updating temp folder in wsadmin.properties"
+            Set-JavaProperties $wsadminPropsPath $wsadminProp
+            $success = $true
+        } else {
+            Write-Error "$wsadminPropsPath could not be located"
+        }
+    } else {
+        Write-Error "The temp directory specified: $TempDir or the profile dir: $ProfilePath are invalid"
+    }
+    Return $success
+}
+
+##############################################################################################################
+# Get-WsAdminTempDir
+#   Retrieves the temporary directory that wsadmin scripts are using
+##############################################################################################################
+Function Get-WsAdminTempDir() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [parameter(Mandatory=$true,position=0)]
+        [string]
+        $ProfilePath
+    )
+    [string] $tempDir = $null
+    if (Test-Path($ProfilePath)) {
+        $wsadminPropsPath = Join-Path -Path $ProfilePath -ChildPath "properties\wsadmin.properties"
+        if (Test-Path $wsadminPropsPath) {
+            [hashtable] $wsadminProp = Get-JavaProperties $wsadminPropsPath @("com.ibm.ws.scripting.tempdir")
+            if ($wsadminProp) {
+                $tempDir = $wsadminProp["com.ibm.ws.scripting.tempdir"]
+            }
+        } else {
+            Write-Error "$wsadminPropsPath could not be located"
+        }
+    } else {
+        Write-Error "The profile dir: $ProfilePath is invalid"
+    }
+    Return $tempDir
+}
+
+Function Get-IBMResources([string] $resourceId) {
+    if (!([String]::IsNullOrEmpty($resourceId))) {
+        [string[]] $resourcesSplit = $resourceId.Split(':')
+        [string[]] $resources = @()
+        foreach ($resource in $resourcesSplit) {
+            if ($resource.Trim().EndsWith("=")) {
+                $resources += ($resource.Substring(0, $resource.Length - 1))
+            } else {
+                $resources += $resource
+            }
+        }
+
+        Return $resources
+    }
+}
+
+Function Get-IBMBaseResources([string[]] $resource1, [string[]] $resource2) {
+    [string[]] $baseResource = @()
+    if ($resource1 -and $resource2) {
+        $baseResource = (Compare-Object $resource1 $resource2 -SyncWindow 1 -ExcludeDifferent -IncludeEqual).InputObject
+    }
+    return $baseResource
+}
+
+Function Get-IBMDeltaResources([string[]] $resource1, [string[]] $resource2) {
+    [string[]] $deltaResource = @()
+    if ($resource1 -and $resource2) {
+        $deltaResource = (Compare-Object $resource1 $resource2 -SyncWindow 1).InputObject
+    }
+    return $deltaResource
+}
+
+##############################################################################################################
+# Import-IBMWebSpherePropertyBasedConfig
+#   Parses a property file created by the Property-Based Configuration Framework in WebSphere 
+##############################################################################################################
+Function Import-IBMWebSpherePropertyBasedConfig() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    param (
+        [parameter(Mandatory=$true,position=0)]
+        [string]
+        $PropertyFilePath
+    )
+
+    [hashtable] $props = @{}
+    [string[]] $resourceBaseKeys = @("ResourceType", "ImplementingResourceType")
+	
+	if (Test-Path $PropertyFilePath){
+		$file = gc $PropertyFilePath
+        [hashtable] $currentResource = @{}
+        [string] $parentResourceId = $null
+		[string] $currentResourceId = $null
+        [boolean] $envSection = $false
+        [string] $propertiesLabel = "Properties"
+		foreach($line in $file) {
+            if ($line.StartsWith("EnvironmentVariablesSection")) {
+                $envSection = $true
+            }
+			if ((!($line.StartsWith('#'))) -and
+				(!($line.StartsWith(';'))) -and
+				(!($line.StartsWith(";"))) -and
+				(!($line.StartsWith('`'))) -and
+				(($line.Contains('=')))) {
+				[string] $propName=$line.split('=', 2)[0]
+                [string] $propValue=$line.split('=', 2)[1]
+                
+                if (!($envSection)) {
+                    if (("ResourceId" -eq $propName) -and $props.ContainsKey($propName)) {
+                        # Next resource id
+                        if ($currentResourceId -ne $propValue) {
+                            $currentResource = @{}
+                            #TODO Handle multi resource / nested PBC files
+                            Write-Warning "Can't handle importing PBC files with more than one resource. TODO."
+                            <# Identify child resource
+                            $propertiesLabel = "Properties"
+                            $parentResource = Get-IBMResources $parentResourceId
+                            $childResource = Get-IBMResources $propValue
+                            $delta = Get-IBMDeltaResources $parentResource $childResource
+                            #>
+                        } else {
+                            # Same resource id, change based on attribute info
+                        }
+                    } elseif (("ResourceId" -eq $propName) -and !$parentResourceId) {
+                        # First resource id (base)
+                        $propertiesLabel = "Properties"
+                        $currentResourceId = $propValue
+                        $parentResourceId = $propValue
+                        $props.Add($currentResourceId, $currentResource)
+                    } else {
+                        # Property handling
+                        # Parse value
+                        if ($propValue.IndexOf('#') -gt 0) {
+                            $propValue = $propValue.Substring(0, $propValue.IndexOf('#'))
+                            $propValue = $propValue.Trim()
+                        }
+                        # Handle resource keys
+                        if ($resourceBaseKeys.Contains($propName)) {
+                            Write-Host ("Adding: " + $propName + "=" + $propValue) -ForegroundColor DarkYellow
+                            $currentResource.Add($propName, $propValue)
+                        } else {
+                            if ("AttributeInfo" -eq $propName) {
+                                $propertiesLabel = $propValue
+                            } else {
+                                # Add resource properties
+                                if ($currentResource.ContainsKey($propertiesLabel)) {
+                                    $currentResource[$propertiesLabel].Add($propName, $propValue)
+                                } else {
+                                    [hashtable] $subProps = @{}
+                                    $subProps.Add($propName, $propValue)
+                                    $currentResource.Add($propertiesLabel, $subProps)
+                                }
+                            }
+                        }
+                    }
+                }
+			}
+		}
+	} else {
+		Write-Error "Property Based Config file: $PropertyFilePath not found"
+	}
+
+    Return $props
+}
+
+##############################################################################################################
+# Export-IBMWebSpherePropertyBasedConfig
+#   Extracts properties to a file based on the Resource Id
+##############################################################################################################
+Function Export-IBMWebSpherePropertyBasedConfig() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    param (
+        [parameter(Mandatory = $true, position=0)]
+		[System.String]
+		$ProfilePath,
+        
+        [parameter(Mandatory = $false, position=2)]
+		[String]
+		$ResourceId,
+
+        [parameter(Mandatory = $false, position=3)]
+		[Hashtable]
+		$ConfigData,
+        
+        [Parameter(Mandatory = $true, position=4)]
+        [System.Management.Automation.PSCredential]
+        $WebSphereAdministratorCredential,
+
+        [parameter(Mandatory = $true, position=5)]
+		[String]
+		$TargetPropertyFile,
+        
+        [parameter(Mandatory = $false, position=6)]
+        [PBCFilter]
+        $FilterMechanism,
+        
+        [parameter(Mandatory = $false, position=7)]
+		[String[]]
+		$SelectedSubTypes
+    )
+
+    if ((!($ResourceId)) -and (!($ConfigData))) {
+        Write-Error "You must specified either a Resource Id or ConfigData to extract properties"
+    }
+
+    [string[]] $wsadminCommands = @()
+    $extractArgs = $null
+    if ($ResourceId) {
+        $wsadminCommands += ("rsrcID = '" + $ResourceId + "'")
+        $extractArgs = "rsrcID, '-propertiesFileName " + $TargetPropertyFile + "'"
+    } else {
+        $configDataStr = ""
+        foreach ($configKey in $ConfigData.Keys) {
+            $configDataStr += (" " + $configKey + "=" + $ConfigData[$configKey])
+        }
+        $extractArgs = "'[-propertiesFileName" + $configDataStr + "]'"
+    }
+
+    $extractTask = "AdminTask.extractConfigProperties(" + $extractArgs + ")"
+    $wsadminCommands += $extractTask
+
+    $wsadminProcess = Invoke-WsAdmin -ProfilePath $ProfilePath -Commands $wsadminCommands -WebSphereAdministratorCredential $WebSphereAdministratorCredential
+
+    Return ($wsadminProcess.ExitCode -eq '0')
+}
+
+##############################################################################################################
+# Test-IBMWebSpherePropertyBasedConfig
+#   Returns true if the properties specified in the PBC file are already present and valid
+##############################################################################################################
+Function Test-IBMWebSpherePropertyBasedConfig() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    param (
+        [parameter(Mandatory = $true, position=0)]
+		[String]
+		$ProfilePath,
+        
+        [parameter(Mandatory = $true, position=1)]
+		[String]
+		$PropertyFile,
+        
+        [Parameter(Mandatory = $true, position=2)]
+        [System.Management.Automation.PSCredential]
+        $WebSphereAdministratorCredential,
+        
+        [parameter(Mandatory = $false, position=3)]
+		[String]
+		$VariablesMapFile,
+        
+        [parameter(Mandatory = $false, position=4)]
+		[Hashtable]
+		$VariablesMap,
+        
+        [parameter(Mandatory = $false, position=5)]
+		[String]
+		$ReportFile
+	)
+
+    if (!(Test-Path $PropertyFile -PathType Leaf)) {
+        Write-Error "You must specified a valid properties file. Invalid file: $ProfileFile"
+    }
+
+    [string[]] $wsadminCommands = @()
+    [string[]] $validateArgs = @()
+    $validateArgs += ("-propertiesFileName", $PropertyFile)
+    if ($ReportFile) {
+        $validateArgs += ("-reportFileName", $ReportFile, "-reportFilterMechanism", "Errors_And_Changes")
+    }
+    if ($VariablesMapFile) {
+        $validateArgs += ("-variablesMapFileName", $VariablesMapFile)
+    }
+    if ($VariablesMap) {
+        $variableStr = "[["
+        foreach ($varKey in $VariablesMap.Keys) {
+            $variableStr += ($varKey + " " + $VariablesMap[$varKey] + " ")
+        }
+        $variableStr = $variableStr.Trim()
+        $variableStr += "]]"
+        $validateArgs += ("-variablesMap", $variableStr)
+    }
+
+    $validateArgsStr = "'[" + ($validateArgs -join " ") + "]'"
+    $validateTask = "AdminTask.validateConfigProperties(" + $validateArgsStr + ")"
+    $wsadminCommands += $validateTask
+
+    $wsadminProcess = Invoke-WsAdmin -ProfilePath $ProfilePath -Commands $wsadminCommands -WebSphereAdministratorCredential $WebSphereAdministratorCredential
+
+    Return $wsadminProcess
+}
+
+##############################################################################################################
+# Set-IBMWebSpherePropertyBasedConfig
+#   Updates WebSphere with the properties specified in the PBC file
+##############################################################################################################
+Function Set-IBMWebSpherePropertyBasedConfig() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    param (
+        [parameter(Mandatory = $true, position=0)]
+		[String]
+		$ProfilePath,
+        
+        [parameter(Mandatory = $true, position=1)]
+		[String]
+		$PropertyFile,
+        
+        [Parameter(Mandatory = $true, position=2)]
+        [System.Management.Automation.PSCredential]
+        $WebSphereAdministratorCredential,
+        
+        [parameter(Mandatory = $false, position=3)]
+		[String]
+		$VariablesMapFile,
+        
+        [parameter(Mandatory = $false, position=4)]
+		[Hashtable]
+		$VariablesMap,
+        
+        [parameter(Mandatory = $false, position=5)]
+		[String]
+		$ReportFile
+	)
+
+    if (!(Test-Path $PropertyFile -PathType Leaf)) {
+        Write-Error "You must specified a valid properties file. Invalid file: $ProfileFile"
+    }
+
+    [string[]] $wsadminCommands = @()
+    [string[]] $applyArgs = @()
+    $applyArgs += ("-propertiesFileName", $PropertyFile)
+    if ($ReportFile) {
+        $applyArgs += ("-reportFileName", $ReportFile, "-reportFilterMechanism", "Errors_And_Changes")
+    }
+    if ($VariablesMapFile) {
+        $applyArgs += ("-variablesMapFileName", $VariablesMapFile)
+    }
+    if ($VariablesMap) {
+        $variableStr = "[["
+        foreach ($varKey in $VariablesMap.Keys) {
+            $variableStr += ($varKey + " " + $VariablesMap[$varKey] + " ")
+        }
+        $variableStr = $variableStr.Trim()
+        $variableStr += "]]"
+        $applyArgs += ("-variablesMap", $variableStr)
+    }
+
+    $applyArgsStr = "'[" + ($applyArgs -join " ") + "]'"
+    $applyTask = "AdminTask.applyConfigProperties(" + $applyArgsStr + ")"
+    $wsadminCommands += $applyTask
+
+    $wsadminProcess = Invoke-WsAdmin -ProfilePath $ProfilePath -Commands $wsadminCommands -WebSphereAdministratorCredential $WebSphereAdministratorCredential
+
+    Return $wsadminProcess
 }
