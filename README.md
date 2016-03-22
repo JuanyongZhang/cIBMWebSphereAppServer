@@ -37,12 +37,30 @@ If you create your own Response File template it is expected that the template h
 * **SourcePath**: _array_ UNC or local file path to the fixpack zip-files.  Supports multiple file paths.
 * **SourcePathCredential**: (Optional) Credential to be used to map sourcepath if a remote share is being specified.
 
+### cIBMWebSphereAppServerProfile
+
+* **Ensure**: (Required) Ensures that WAS profile is Present or Absent on the machine.
+* **ProfileName**: (Key) The name of the profile
+* **ProfilePath**: (Optional) Location of profile.  If not specified it'll be added to the AppServer\profiles directory.
+* **NodeName**: (Required) Name of the WebSphere Node for the server
+* **CellName**: (Optional) Should only be used for Dmgr.
+* **HostName**: FQDN of the host in the target machine.
+* **TemplatePath**: (Optional) full path to the template to be used for creating this profile
+* **AdminCredential**: (Optional) Credential to be used to create the profiles (if applicable)
+* **IsDmgr**: Boolean that detimines if the profile to be created is of type of Dmgr or not.
+* **DmgrHost**: If not Dmgr, the hostname of the Dmgr
+* **DmgrPort**: If not Dmgr, the SOAP port of the Dmgr, usually 8879
+
 ## Depedencies
 * [cIBMInstallationManager](http://github.com/dennypc/cIBMInstallationManager) DSC Resource/CmdLets for IBM Installation Manager
 * [7-Zip](http://www.7-zip.org/ "7-Zip") needs to be installed on the target machine.  You can add 7-Zip to your DSC configuration by using the Package
 DSC Resource or by leveraging the [x7Zip DSC Module](https://www.powershellgallery.com/packages/x7Zip/ "x7Zip at PowerShell Gallery")
 
 ## Versions
+
+### 1.0.3
+* New DSC Resource for creating WebSphere profiles (including Dmgr support) **cIBMWebSphereAppServerProfile**
+* New CmdLets: **New-IBMWebSphereProfile**, **Invoke-ManageProfiles**, **Start-WebSphereDmgr**, **Stop-WebSphereDmgr**
 
 ### 1.0.2
 * New DSC Resource for installing fixpacks **cIBMWebSphereAppServerFixpack**

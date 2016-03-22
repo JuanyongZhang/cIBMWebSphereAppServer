@@ -9,7 +9,7 @@
 RootModule = 'cIBMWebSphereAppServer.psm1'
 
 # Version number of this module.
-ModuleVersion = '1.0.2'
+ModuleVersion = '1.0.3'
 
 # ID used to uniquely identify this module
 GUID = '325e1620-53fc-43bd-8380-80f702c2e8c0'
@@ -21,7 +21,7 @@ GUID = '325e1620-53fc-43bd-8380-80f702c2e8c0'
 NestedModules = @('cIBMWebSphereAppServerUtils')
 
 # DSC resources to export from this module
-DscResourcesToExport = @('cIBMWebSphereAppServer', 'cIBMWebSphereAppServerFixpack')
+DscResourcesToExport = @('cIBMWebSphereAppServer', 'cIBMWebSphereAppServerFixpack', 'cIBMWebSphereAppServerProfile')
 
 # Author of this module
 Author = 'Denny Pichardo'
@@ -89,7 +89,7 @@ PrivateData = @{
     PSData = @{
 
         # Tags applied to this module. These help with module discovery in online galleries.
-        Tags = @('IBM', 'WebSphereAppServer', 'WebSphere')
+        Tags = @('IBM', 'WebSphereAppServer', 'WebSphere', 'Dmgr', 'Fixpack')
 
         # A URL to the license for this module.
         LicenseUri = 'https://raw.githubusercontent.com/dennypc/cIBMWebSphereAppServer/master/LICENSE'
@@ -101,7 +101,7 @@ PrivateData = @{
         # IconUri = ''
 
         # ReleaseNotes of this module
-        ReleaseNotes = 'New DSC resource for installing fixpacks. Added wsadmin and property based config cmdlets.'
+        ReleaseNotes = 'New DSC resource for creating WebSphere profiles.  Supports Dmgr creation along with Windows Service.'
 
     } # End of PSData hashtable
 

@@ -2,6 +2,12 @@
 
 Configuration WASND
 {
+    param (
+        [Parameter(Mandatory)]
+        [PSCredential]
+        $WebSphereAdminCredential
+    )
+    
     Import-DscResource -ModuleName 'PSDesiredStateConfiguration'
     Import-DSCResource -ModuleName 'cIBMInstallationManager'
     Import-DSCResource -ModuleName 'cIBMWebSphereAppServer'
@@ -39,6 +45,17 @@ Configuration WASND
         SourcePath = @('C:\Media\WAS855_FP\8.5.5-WS-WAS-FP0000006-part1.zip', 'C:\Media\WAS855_FP\8.5.5-WS-WAS-FP0000006-part2.zip')
         DependsOn= '[cIBMWebSphereAppServer]WASNDInstall'
     }
+    cIBMWebSphereAppServerProfile DmgrProfile
+    {
+        Ensure = 'Present'
+        ProfileName = 'dmgrCell01'
+        NodeName = 'dmgrNode'
+        HostName = 'public.example.com'
+        CellName = 'dmgrCell'
+        IsDmgr = $true
+        AdminCredential = $WebSphereAdminCredential
+        DependsOn= '[cIBMWebSphereAppServerFixpack]WASFixpackInstall'
+    }
 }
-WASND
+WASND -WebSphereAdminCredential $wasAdminCredential
 Start-DscConfiguration -Wait -Force -Verbose WASND

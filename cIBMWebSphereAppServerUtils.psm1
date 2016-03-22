@@ -28,6 +28,8 @@ $IBM_REGPATH_64 = "HKLM:\Software\Wow6432Node\IBM\"
 $IBM_REGPATH_USER = "HKCU:\Software\IBM\"
 $IBM_REGPATH_USER_64 = "HKCU:\Software\Wow6432Node\IBM\"
 
+$WAS_SVC_PREFIX = "IBM WebSphere Application Server V"
+
 ##############################################################################################################
 # Get-IBMWebSphereProductRegistryPath
 #   Returns the registry path for the IBM WebSphere Product specified
@@ -650,11 +652,10 @@ Function Invoke-WsAdmin() {
                     $wsArgs += ('"' + $wsadminArg + '"')
                 }
             }
-            $wsArgs | Out-Host
             $discStdOut = $DiscardStandardOut.IsPresent
             $discStdErr = $DiscardStandardErr.IsPresent
             $wsAdminProcess = Invoke-ProcessHelper -ProcessFileName $wsAdminBat -ProcessArguments $wsArgs `
-                                -WorkingDirectory (Split-Path($wsAdminBat)) -DiscardStandardOut:$discStdOut -DiscardStandardErr:$discStdErr -Verbose
+                                -WorkingDirectory (Split-Path($wsAdminBat)) -DiscardStandardOut:$discStdOut -DiscardStandardErr:$discStdErr
             if ($wsAdminProcess -and (!($wsAdminProcess.StdErr)) -and ($wsAdminProcess.ExitCode -eq 0)) {
                 $exceptions = Select-String -InputObject $wsAdminProcess.StdOut -Pattern "Exception" -AllMatches
                 $success = ($exceptions.Matches.Count -eq 0)
@@ -752,6 +753,227 @@ Function Get-WsAdminTempDir() {
         Write-Error "The profile dir: $ProfilePath is invalid"
     }
     Return $tempDir
+}
+
+##############################################################################################################
+# New-IBMWebSphereProfile
+#   Creates a new WebSphere profile using manageprofiles.bat
+##############################################################################################################
+Function New-IBMWebSphereProfile() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [parameter(Mandatory=$true)]
+        [string] $ProfileName,
+        
+        [parameter(Mandatory=$true)]
+        [String] $NodeName,
+        
+        [string] $ProfilePath,
+ 
+        [String] $CellName,
+        
+        [String] $HostName,
+        
+        [String] $TemplatePath,
+        
+        [System.Management.Automation.PSCredential] $AdminCredential,
+        
+        [switch] $Dmgr,
+
+        [String] $DmgrHost,
+        
+        [String] $DmgrPort
+    )
+
+    [bool] $profileCreated = $false
+    
+    if (!($Dmgr) -and (!($DmgrHost) -or (!$DmgrPort) -or (!$AdminCredential))) {
+        Write-Error "Unable to create profile. Dmgr settings not specified correctly"
+    }
+    
+    [string] $WASAppServerHome = Get-IBMWebSphereAppServerInstallLocation ND
+    
+    if (!$WASAppServerHome) {
+        Write-Error "Unable to find the WebSphere App Server Home Directory"
+    }
+    
+    if (!$ProfilePath) {
+        $ProfilePath = Join-Path $WASAppServerHome -ChildPath "profiles\$ProfileName"
+    }
+    
+    [string] $fullTemplatePath = $null
+    if (!$TemplatePath -and $Dmgr) {
+        $fullTemplatePath = Join-Path -Path $WASAppServerHome -ChildPath "profileTemplates\management"
+    } elseif (!$TemplatePath) {
+        $fullTemplatePath = Join-Path -Path $WASAppServerHome -ChildPath "profileTemplates\managed"
+    } else {
+        $fullTemplatePath = $TemplatePath
+    }
+    
+    [string[]] $profileCmd = @('-create')
+    $profileCmd += ('-templatePath', ('"' + $fullTemplatePath + '"'))
+    $profileCmd += ('-profileName', $ProfileName)
+    $profileCmd += ('-profilePath', $ProfilePath)
+    $profileCmd += ('-nodeName', $NodeName)
+    
+    if ($CellName) {
+        $profileCmd += ('-cellName', $CellName)
+    }
+    if ($HostName) {
+        $profileCmd += ('-hostName', $HostName)
+    }
+    
+    if ($Dmgr) {
+        if ($AdminCredential) {
+            $adminUserName = $AdminCredential.UserName
+            $adminPwd = $AdminCredential.GetNetworkCredential().Password
+            $profileCmd += ('-enableAdminSecurity', 'true')
+            $profileCmd += ('-adminUserName', $adminUserName)
+            $profileCmd += ('-adminPassword', ('"' + $adminPwd + '"'))
+        }
+    } else {
+        if ($DmgrHost) {
+            $profileCmd += ('-dmgrHost', $DmgrHost)
+        }
+        if ($DmgrPort) {
+            $profileCmd += ('-dmgrPort', $DmgrPort)
+        }
+        if ($AdminCredential) {
+            $adminUserName = $AdminCredential.UserName
+            $adminPwd = $AdminCredential.GetNetworkCredential().Password
+            $profileCmd += ('-dmgrAdminUserName', $adminUserName)
+            $profileCmd += ('-dmgrAdminPassword', ('"' + $adminPwd + '"'))
+        }
+    }
+    
+    $mpProcess = Invoke-ManageProfiles -WASAppServerPath $WASAppServerHome -Commands $profileCmd
+
+    if ($mpProcess -and $mpProcess.StdOut) {
+        if ($mpProcess.StdOut.Trim().StartsWith("INSTCONFSUCCESS:")) {
+            $profileCreated = $true
+        }
+    }
+    
+    Return $profileCreated
+}
+
+##############################################################################################################
+# Invoke-ManageProfiles
+#   Wrapper function for manageprofiles.bat
+##############################################################################################################
+Function Invoke-ManageProfiles() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [Parameter(Mandatory=$true,position=0)]
+        [String]
+        $WASAppServerPath,
+
+        [Parameter(Mandatory=$true,position=1)]
+        [String[]]
+        $Commands,
+        
+        [Parameter(Mandatory=$false,position=2)]
+        [System.Management.Automation.PSCredential]
+        $AdminCredential
+    )
+
+    [string] $manageProfilesBat = Join-Path -Path $WASAppServerPath -ChildPath "bin\manageprofiles.bat"
+    [PSCustomObject] $manageProfileProcess = @{
+        StdOut = $null
+        StdErr = $null
+        ExitCode = $null
+    }
+    if (Test-Path($manageProfilesBat)) {
+        [string[]] $mpArgs = $Commands
+        # Add credentials
+        if ($AdminCredential) {
+            $adminUserName = $AdminCredential.UserName
+            $adminPwd = $AdminCredential.GetNetworkCredential().Password
+            $mpArgs += @("-adminUserName", $adminUserName, "-adminPassword", $adminPwd)
+        }
+        $manageProfileProcess = Invoke-ProcessHelper -ProcessFileName $manageProfilesBat -ProcessArguments $mpArgs `
+                            -WorkingDirectory (Split-Path($manageProfilesBat))
+        if (!$manageProfileProcess -or (($manageProfileProcess.StdErr)) -and ($manageProfileProcess.ExitCode -ne 0)) {
+            $errorMsg = $null
+            if ($manageProfileProcess -and $manageProfileProcess.StdErr) {
+                $errorMsg = $manageProfileProcess.StdErr
+            } else {
+                $errorMsg = $manageProfileProcess.StdOut
+            }
+            $exitCode = (&{if($manageProfileProcess) {$manageProfileProcess.ExitCode} else {$null}})
+            Write-Error "An error occurred while executing the manageprofiles.bat process. ExitCode: $exitCode Mesage: $errorMsg"
+        }
+    } else {
+        Write-Error "Unable to locate manageprofiles.bat using: $wsAdminBat"
+    }
+    Return $manageProfileProcess
+}
+
+##############################################################################################################
+# Start-WebSphereDmgr
+#   Starts the WebSphere Deployment Manager
+##############################################################################################################
+Function Start-WebSphereDmgr {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [parameter(Mandatory=$true,position=1)]
+        [string] $DmgrProfileDir,
+        
+        [parameter(Mandatory=$true,position=2)]
+        [System.Management.Automation.PSCredential] $WebSphereAdministratorCredential
+    )
+
+    $wasSvcName = "*" + $WAS_SVC_PREFIX + "*DMGR"
+    $wasSvc = Get-Service -DisplayName $wasSvcName
+    
+    if ($wasSvc) {
+        if ($wasSvc.Status -ne "Running") {
+            Write-Verbose "Starting WebSphere Deployment Manager via Windows Service"
+            Start-Service $wasSvc
+            $dmgrPidFile = Join-Path -Path $DmgrProfileDir -ChildPath "logs\dmgr\dmgr.pid"
+            if (Test-Path($dmgrPidFile)) {
+                $sleepTimer = 0;
+                Write-Verbose "Waiting for DMGR PID file to be created: $dmgrPidFile"
+                while(!(Test-Path $dmgrPidFile)) {
+                    sleep -s 10
+                    $sleepTimer += 10
+                    # Wait maximum of 10 minutes for portal to start after service is initialized
+                    if ($sleepTimer -ge 600) {
+                        break
+                    }
+                }
+            }
+        } else {
+            Write-Verbose "WebSphere Deployment Manager already started"
+        }
+    }
+}
+
+##############################################################################################################
+# Stop-WebSphereDmgr
+#   Stops the WebSphere Deployment Manager
+##############################################################################################################
+Function Stop-WebSphereDmgr {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [parameter(Mandatory=$true,position=1)]
+        [string] $DmgrProfileDir,
+        
+        [parameter(Mandatory=$true,position=2)]
+        [System.Management.Automation.PSCredential] $WebSphereAdministratorCredential
+    )
+
+    $wasSvcName = "*" + $WAS_SVC_PREFIX + "*DMGR"
+    $wasSvc = Get-Service -DisplayName $wasSvcName
+    
+    if ($wasSvc) {
+        if ($wasSvc.Status -ne "Stopped") {
+            Write-Verbose "Stopping WebSphere Deployment Manager via Windows Service"
+            Stop-Service $wasSvc
+        } else {
+            Write-Verbose "WebSphere Deployment Manager already stopped"
+        }
+    }
 }
 
 Function Get-IBMResources([string] $resourceId) {
