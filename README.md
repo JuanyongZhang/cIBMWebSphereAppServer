@@ -59,6 +59,9 @@ DSC Resource or by leveraging the [x7Zip DSC Module](https://www.powershellgalle
 
 ## Versions
 
+### 1.0.4
+* IBM Java 7 installation support via new DSC property _PlusJava7_
+
 ### 1.0.3
 * New DSC Resource for creating WebSphere profiles (including Dmgr support) **cIBMWebSphereAppServerProfile**
 * New CmdLets: **New-IBMWebSphereProfile**, **Invoke-ManageProfiles**, **Start-WebSphereDmgr**, **Stop-WebSphereDmgr**
