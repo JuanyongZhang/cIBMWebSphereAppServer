@@ -9,7 +9,7 @@
 RootModule = 'cIBMWebSphereAppServer.psm1'
 
 # Version number of this module.
-ModuleVersion = '1.0.3'
+ModuleVersion = '1.0.4'
 
 # ID used to uniquely identify this module
 GUID = '325e1620-53fc-43bd-8380-80f702c2e8c0'
@@ -101,7 +101,7 @@ PrivateData = @{
         # IconUri = ''
 
         # ReleaseNotes of this module
-        ReleaseNotes = 'New DSC resource for creating WebSphere profiles.  Supports Dmgr creation along with Windows Service.'
+        ReleaseNotes = 'IBM Java 7 installation support, new DSC property'
 
     } # End of PSData hashtable
 

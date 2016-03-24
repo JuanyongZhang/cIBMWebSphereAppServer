@@ -49,6 +49,9 @@ class cIBMWebSphereAppServer {
     [String] $SourcePath
     
     [DscProperty()]
+    [bool] $PlusJava7 = $false
+    
+    [DscProperty()]
     [System.Management.Automation.PSCredential] $SourcePathCredential
 
     <#
@@ -63,10 +66,19 @@ class cIBMWebSphereAppServer {
                     $ibmwasEdition = $this.WASEdition.ToString()
                     $wasVersion = $this.Version
                     if (!($this.InstallMediaConfig)) {
-                        $this.InstallMediaConfig = Join-Path -Path $PSScriptRoot -ChildPath "InstallMediaConfig\$ibmwasEdition-$wasVersion.xml"
+                        if ($this.PlusJava7) {
+                            $this.InstallMediaConfig = Join-Path -Path $PSScriptRoot -ChildPath "InstallMediaConfig\$ibmwasEdition-$wasVersion-plus-JAVA7.xml"
+                        } else {
+                            $this.InstallMediaConfig = Join-Path -Path $PSScriptRoot -ChildPath "InstallMediaConfig\$ibmwasEdition-$wasVersion.xml"
+                        }
+                        
                     }
                     if (!($this.ResponseFileTemplate)) {
-                        $this.ResponseFileTemplate = Join-Path -Path $PSScriptRoot -ChildPath "ResponseFileTemplates\$ibmwasEdition-$wasVersion-template.xml"
+                        if ($this.PlusJava7) {
+                            $this.ResponseFileTemplate = Join-Path -Path $PSScriptRoot -ChildPath "ResponseFileTemplates\$ibmwasEdition-$wasVersion-template-plus-JAVA7.xml"
+                        } else {
+                            $this.ResponseFileTemplate = Join-Path -Path $PSScriptRoot -ChildPath "ResponseFileTemplates\$ibmwasEdition-$wasVersion-template.xml"
+                        }
                     }
                     
                     $installed = Install-IBMWebSphereAppServer -InstallMediaConfig $this.InstallMediaConfig `

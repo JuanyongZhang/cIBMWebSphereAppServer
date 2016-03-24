@@ -19,6 +19,7 @@ PS> Install-Module -Name cIBMWebSphereAppServer
 * **Version**: (Key) The version of WAS to install
 * **WASEdition**: (Key) The edition of WAS to install.  Options: BASE, ND, EXPRESS, DEVELOPER, LIBERTY
 * **InstallationDirectory**: Installation path.  Default: C:\IBM\WebSphere\AppServer.
+* **PlusJava7**: _Boolean_ Determines whether or not the IBM Java 7 SDK gets installed
 * **IMSharedLocation**: Location of the IBM Installation Manager cache.  Default: C:\IBM\IMShared
 * **InstallMediaConfig**: (Optional) Path to the clixml export of the IBMProductMedia object that contains media configuration.
 * **ResponseFileTemplate**: (Optional) Path to the response file template to use for the installation.
