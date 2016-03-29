@@ -552,7 +552,7 @@ Function Test-IBMWebSphereTopology() {
 	)
     
     $TopologyExists = $false
-    $WasCells = Get-WebSphereTopology $ProfilePath -ErrorAction Stop
+    $WasCells = Get-IBMWebSphereTopology $ProfilePath -ErrorAction Stop
     
     if ($WasCells.ContainsKey($CellName)) {
         if ($WasCells.$CellName.ContainsKey($NodeName)) {
