@@ -46,7 +46,7 @@ Function Get-IBMWebSphereProductRegistryPath() {
         $Version
     )
 
-    Write-Verbose "Get-IBMWebSphereProductRegistryPath::ENTRY(ProductName=$ProductName,Version=$Version)"
+    Write-Debug "Get-IBMWebSphereProductRegistryPath::ENTRY(ProductName=$ProductName,Version=$Version)"
 
     $ibmProductPath = $null
     if ([IntPtr]::Size -eq 8) {
@@ -77,6 +77,7 @@ Function Get-IBMWebSphereProductRegistryPath() {
         try {
             New-PSDrive -Name HKU -PSProvider Registry -Root Registry::HKEY_USERS | Out-Null
             $LoggedOnSids = (Get-ChildItem HKU: | where { $_.Name -match 'S-\d-\d+-(\d+-){1,14}\d+$' }).PSChildName
+            $LoggedOnSids += ".DEFAULT" # Adds default to the list of users to search
             foreach ($sid in $LoggedOnSids) {
                 if ([IntPtr]::Size -eq 8) {
                     $ibmProductPath = ("HKU:\$sid\Software\Wow6432Node\IBM\" + $ProductName)
@@ -85,11 +86,11 @@ Function Get-IBMWebSphereProductRegistryPath() {
                         if (!(Test-Path($ibmProductPath))) {
                             $ibmProductPath = $null
                         } else {
-                            Write-Warning "IBM Product Found under a different user"
+                            Write-Debug "IBM Product Found under a different user"
                             break
                         }
                     } else {
-                        Write-Warning "IBM Product Found under a different user"
+                        Write-Debug "IBM Product Found under a different user"
                         break
                     }
                 } else {
@@ -97,7 +98,7 @@ Function Get-IBMWebSphereProductRegistryPath() {
                     if (!(Test-Path($ibmProductPath))) {
                         $ibmProductPath = $null
                     } else {
-                        Write-Warning "IBM Product Found under a different user"
+                        Write-Debug "IBM Product Found under a different user"
                         break
                     }
                 }
@@ -107,7 +108,7 @@ Function Get-IBMWebSphereProductRegistryPath() {
         }
     }
 
-    Write-Verbose "Get-IBMWebSphereProductRegistryPath returning path: $ibmProductPath"
+    Write-Debug "Get-IBMWebSphereProductRegistryPath returning path: $ibmProductPath"
 
     if ($ibmProductPath -and $Version) {
         $versionNotFound = $false
@@ -122,13 +123,13 @@ Function Get-IBMWebSphereProductRegistryPath() {
                 }
             }
         }
-        Write-Verbose "Get-IBMWebSphereProductRegistryPath returning version path: $ibmProductVersionPath"
+        Write-Debug "Get-IBMWebSphereProductRegistryPath returning version path: $ibmProductVersionPath"
         if (!($versionNotFound)) {
             $ibmProductPath = $ibmProductVersionPath
         }
     }
     
-    Write-Verbose "Get-IBMWebSphereProductRegistryPath returning path: $ibmProductPath"
+    Write-Debug "Get-IBMWebSphereProductRegistryPath returning path: $ibmProductPath"
     
     Return $ibmProductPath
 }
@@ -904,7 +905,7 @@ Function Invoke-ManageProfiles() {
             Write-Error "An error occurred while executing the manageprofiles.bat process. ExitCode: $exitCode Mesage: $errorMsg"
         }
     } else {
-        Write-Error "Unable to locate manageprofiles.bat using: $wsAdminBat"
+        Write-Error "Unable to locate manageprofiles.bat using: $manageProfilesBat"
     }
     Return $manageProfileProcess
 }
