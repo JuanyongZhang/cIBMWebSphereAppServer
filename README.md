@@ -59,6 +59,9 @@ DSC Resource or by leveraging the [x7Zip DSC Module](https://www.powershellgalle
 
 ## Versions
 
+### 1.0.5
+* Minor fixes release
+
 ### 1.0.4
 * IBM Java 7 installation support via new DSC property _PlusJava7_
 
