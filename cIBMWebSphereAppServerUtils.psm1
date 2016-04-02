@@ -911,6 +911,202 @@ Function Invoke-ManageProfiles() {
 }
 
 ##############################################################################################################
+# Stop-WebSphereServer
+#   Stops the WebSphere Application Server using its Windows Service
+##############################################################################################################
+Function Stop-WebSphereServer {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [Parameter(Mandatory=$True, Position=0)]
+        [String]
+        $ServerName
+    )
+
+    $wasSvcName = "*" + $WAS_SVC_PREFIX + "*" + $serverName
+    $wasSvc = Get-Service -DisplayName $wasSvcName
+
+    if ($wasSvc.Status -ne "Stopped") {
+        Write-Verbose "Stopping WebSphere Server: $serverName via Windows Service"
+        Stop-Service $wasSvc
+    } else {
+        Write-Verbose "WebSphere Server: $serverName already stopped"
+    }
+}
+
+##############################################################################################################
+# Stop-AllWebSphereServers
+#   Stops the WebSphere Application Server using its Windows Service
+##############################################################################################################
+Function Stop-AllWebSphereServers {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+	Param()
+	
+	Write-Verbose "Stopping All WebSphere Servers"
+    $wasSvcName = "*" + $WAS_SVC_PREFIX + "*"
+    Get-Service -DisplayName $wasSvcName | Foreach {
+        $currSvcName = $_.DisplayName 
+        if ($_.Status -ne "Stopped") {
+            Write-Verbose "Stopping WebSphere Server: $currSvcName via Windows Service"
+            Stop-Service $_
+        } else {
+            Write-Verbose "WebSphere Server: $currSvcName. already stopped"
+        }
+    }
+}
+
+##############################################################################################################
+# Start-WebSphereServer
+#   Starts the WebSphere Application Server using its Windows Service
+##############################################################################################################
+Function Start-WebSphereServer() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [Parameter(Mandatory=$true, Position=0)]
+        [String]
+        $ServerName
+    )
+
+    $wasSvcName = "*" + $WAS_SVC_PREFIX + "*" + $serverName
+    $wasSvc = Get-Service -DisplayName $wasSvcName
+
+    if ($wasSvc.Status -ne "Running") {
+        Write-Verbose "Starting WebSphere Server: $serverName via Windows Service"
+        Start-Service $wasSvc
+    }
+}
+
+##############################################################################################################
+# Test-WebSphereServerService
+#   Returns true if the WebSphere Application Server is running
+##############################################################################################################
+Function Test-WebSphereServerService() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [Parameter(Mandatory=$true, Position=0)]
+        [String]
+        $ServerName
+    )
+
+    Try {
+        $wasSvcName = "*" + $WAS_SVC_PREFIX + "*" + $serverName
+        $wasSvc = Get-Service -DisplayName $wasSvcName
+        
+        if ($wasSvc.Status -eq "Running") {
+            Return $true
+        } else {
+            Return $false
+        }
+    } Catch {
+        Return $false
+    }
+}
+
+##############################################################################################################
+# Test-WebSphereServerServiceExists
+#   Returns true if the WebSphere Application Server Windows Service Exists
+##############################################################################################################
+Function Test-WebSphereServerServiceExists() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [Parameter(Mandatory=$true, Position=0)]
+        [String]
+        $ServerName
+    )
+
+    Try {
+        $wasSvcName = "*" + $WAS_SVC_PREFIX + "*" + $serverName
+        if (Get-Service -DisplayName $wasSvcName) {
+            Return $true
+        } else {
+            Return $false
+        }
+    } Catch {
+        Return $false
+    }
+}
+
+##############################################################################################################
+# Start-WebSphereNodeAgent
+#   Starts the WebSphere Node Agent
+##############################################################################################################
+Function Start-WebSphereNodeAgent {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [Parameter(Mandatory=$false, Position=0)]
+        [String]
+        $NodeName,
+        
+        [parameter(Mandatory=$true,position=1)]
+        [string]
+        $ProfileDir,
+        
+        [parameter(Mandatory=$true,position=2)]
+        [System.Management.Automation.PSCredential]
+        $WebSphereAdministratorCredential
+    )
+
+    $wasSvcName = "*" + $WAS_SVC_PREFIX + "*NODEAGENT"
+    $wasSvc = Get-Service -DisplayName $wasSvcName
+    
+    if ($wasSvc) {
+        if ($wasSvc.Status -ne "Running") {
+            Write-Verbose "Starting Node Agent via Windows Service"
+            Start-Service $wasSvc
+            if (($ProfileDir) -and (Test-Path($ProfileDir))) {
+                $naPidFile = Join-Path -Path $ProfileDir -ChildPath "logs\nodeagent\nodeagent.pid"
+                if (Test-Path($naPidFile)) {
+                    $sleepTimer = 0;
+                    Write-Verbose "Waiting for Node Agent PID file to be created: $naPidFile"
+                    while(!(Test-Path $naPidFile)) {
+                        sleep -s 10
+                        $sleepTimer += 10
+                        # Wait maximum of 10 minutes for portal to start after service is initialized
+                        if ($sleepTimer -ge 600) {
+                            break
+                        }
+                    }
+                }
+            }
+        } else {
+            Write-Verbose "Node agent already started"
+        }
+    }
+}
+
+##############################################################################################################
+# Stop-WebSphereNodeAgent
+#   Stops the WebSphere Node Agent
+##############################################################################################################
+Function Stop-WebSphereNodeAgent {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [Parameter(Mandatory=$true, Position=0)]
+        [String]
+        $NodeName,
+        
+        [parameter(Mandatory=$true,position=1)]
+        [string]
+        $ProfileDir,
+        
+        [parameter(Mandatory=$true,position=2)]
+        [System.Management.Automation.PSCredential]
+        $WebSphereAdministratorCredential
+    )
+
+    $wasSvcName = "*" + $WAS_SVC_PREFIX + "*NODEAGENT"
+    $wasSvc = Get-Service -DisplayName $wasSvcName
+    
+    if ($wasSvc) {
+        if ($wasSvc.Status -ne "Stopped") {
+            Write-Verbose "Stopping Node Agent via Windows Service"
+            Stop-Service $wasSvc
+        } else {
+            Write-Verbose "Node agent already stopped"
+        }
+    }
+}
+
+##############################################################################################################
 # Start-WebSphereDmgr
 #   Starts the WebSphere Deployment Manager
 ##############################################################################################################

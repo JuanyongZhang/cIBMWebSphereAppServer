@@ -101,7 +101,7 @@ PrivateData = @{
         # IconUri = ''
 
         # ReleaseNotes of this module
-        ReleaseNotes = 'Minor fixes'
+        ReleaseNotes = 'Minor fixes, Start/Stop CmdLets'
 
     } # End of PSData hashtable
 

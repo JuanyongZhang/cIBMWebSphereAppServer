@@ -7,11 +7,11 @@ To get started using this module just type the command below and the module will
 PS> Install-Module -Name cIBMWebSphereAppServer
 ```
 
-**Coming Soon:** _Profile generation and WSAdmin CmdLets_ Subscribe to this repo to get notified.
-
 ## Resources
 
 * **cIBMWebSphereAppServer** installs IBM WebSphere Application Server on target machine.
+* **cIBMWebSphereAppServerFixpack** applies a Websphere Fixpack on the target machine
+* **cIBMWebSphereAppServerProfile** creates a WebSphere profile.
 
 ### cIBMWebSphereAppServer
 
@@ -60,7 +60,8 @@ DSC Resource or by leveraging the [x7Zip DSC Module](https://www.powershellgalle
 ## Versions
 
 ### 1.0.5
-* Minor fixes release
+* Minor fixes
+* New CmdLets: **Start-WebSphereServer**, **Stop-WebSphereServer**, **Stop-AllWebSphereServers**, **Start-WebSphereNodeAgent**, **Stop-WebSphereNodeAgent**, **Test-WebSphereServerService**, **Test-WebSphereServerServiceExists**
 
 ### 1.0.4
 * IBM Java 7 installation support via new DSC property _PlusJava7_
