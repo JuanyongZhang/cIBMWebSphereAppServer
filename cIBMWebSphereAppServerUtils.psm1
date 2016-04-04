@@ -976,6 +976,131 @@ Function Start-WebSphereServer() {
 }
 
 ##############################################################################################################
+# Test-WebSphereServerStatusViaBatch
+#   Checks the WebSphere Application Server status using the serverStatus Batch Job
+##############################################################################################################
+Function Test-WebSphereServerStatusViaBatch()  {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [Parameter(Mandatory=$true, Position=0)]
+        [String] $ServerName,
+
+        [parameter(Mandatory=$true, Position=1)]
+        [string] $ProfileDir,
+
+        [parameter(Mandatory=$true, Position=2)]
+        [PSCredential] $WebSphereAdministratorCredential
+    )
+
+    $started = $false
+    $profileBin = Join-Path -Path $ProfileDir -ChildPath "bin"
+    if (Test-Path($profileBin)) {
+        $serverStatusCmd = Join-Path -Path $profileBin -ChildPath "serverStatus.bat"
+        $statusArgs = @($ServerName, "-username", $WebSphereAdministratorCredential.UserName, "-password", $WebSphereAdministratorCredential.GetNetworkCredential().Password)
+        $serverStatusProc = Invoke-ProcessHelper -ProcessFileName $serverStatusCmd -ProcessArguments $statusArgs -WorkingDirectory $profileBin
+        if ($serverStatusProc -and (!($serverStatusProc.StdErr))) {
+            if ($serverStatusProc.StdOut.Contains(" is STARTED")) {
+                $started = $true
+            } elseif ($serverStatusProc.StdOut.Contains("appears to be stopped")) {
+                $started = $false
+            } else {
+                Write-Verbose ($serverStatusProc.StdOut)
+            }
+        } else {
+            Write-Error "An error occurred while executing the serverStatus.bat process"
+        }
+    } else {
+        Write-Error "Invalid profile directory"
+    }
+    Return $started
+}
+
+##############################################################################################################
+# Start-WebSphereServerViaBatch
+#   Starts the WebSphere Application Server using the startServer Batch Job
+##############################################################################################################
+Function Start-WebSphereServerViaBatch() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [Parameter(Mandatory=$true, Position=0)]
+        [String] $ServerName,
+
+        [parameter(Mandatory=$true, Position=1)]
+        [String] $ProfileDir
+    )
+
+    $started = $false
+    $profileBin = Join-Path -Path $ProfileDir -ChildPath "bin"
+    if (Test-Path($profileBin)) {
+        $startServerCmd = Join-Path -Path $profileBin -ChildPath "startServer.bat"
+        $startServerProc = Invoke-ProcessHelper -ProcessFileName $startServerCmd -ProcessArguments @($ServerName) -WorkingDirectory $profileBin
+        if ($startServerProc -and (!($startServerProc.StdErr))) {
+            if ($startServerProc.StdOut.Contains("An instance of the server may already be running")) {
+                $started = $true
+            } elseif ($startServerProc.StdOut.Contains("open for e-business; process id is")) {
+                $started = $true
+            } elseif ($startServerProc.StdOut.Contains("java.io.FileNotFoundException")) {
+                $started = $false
+                Write-Error "Invalid server name: $ServerName"
+            } else {
+                Write-Verbose ($startServerProc.StdOut)
+            }
+        } else {
+            Write-Error "An error occurred while executing the startServer.bat process"
+        }
+    } else {
+        Write-Error "Invalid profile directory"
+    }
+    Return $started
+}
+
+##############################################################################################################
+# Stop-WebSphereServerViaBatch
+#   Stops the WebSphere Application Server using the stopServer Batch Job
+##############################################################################################################
+Function Stop-WebSphereServerViaBatch()  {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [Parameter(Mandatory=$true, Position=0)]
+        [String]
+        $ServerName,
+
+        [parameter(Mandatory=$true, Position=1)]
+        [string]
+        $ProfileDir,
+
+        [parameter(Mandatory=$true, Position=2)]
+        [System.Management.Automation.PSCredential]
+        $WebSphereAdministratorCredential
+    )
+
+    $stopped = $false
+    $profileBin = Join-Path -Path $ProfileDir -ChildPath "bin"
+    if (Test-Path($profileBin)) {
+        $stopServerCmd = Join-Path -Path $profileBin -ChildPath "stopServer.bat"
+        $stopArgs = @($ServerName, "-username", $WebSphereAdministratorCredential.UserName, "-password", $WebSphereAdministratorCredential.GetNetworkCredential().Password)
+        $stopServerProc = Invoke-ProcessHelper -ProcessFileName $stopServerCmd -ProcessArguments $stopArgs -WorkingDirectory $profileBin
+        if ($stopServerProc -and (!($stopServerProc.StdErr))) {
+            if ($stopServerProc.StdOut.Contains("cannot be reached.")) {
+                $stopped = $true
+            } elseif ($stopServerProc.StdOut.Contains("stop completed.")) {
+                $stopped = $true
+            } elseif ($stopServerProc.StdOut.Contains("java.io.FileNotFoundException")) {
+                $stopped = $false
+                Write-Error "Invalid server name: $ServerName"
+            } else {
+                Write-Verbose ($stopServerProc.StdOut)
+            }
+        } else {
+            Write-Error "An error occurred while executing the stopServer.bat process"
+        }
+    } else {
+        Write-Error "Invalid profile directory"
+    }
+    Return $stopped
+}
+
+##############################################################################################################
 # Test-WebSphereServerService
 #   Returns true if the WebSphere Application Server is running
 ##############################################################################################################
