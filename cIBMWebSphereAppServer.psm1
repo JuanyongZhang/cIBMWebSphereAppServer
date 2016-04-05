@@ -353,7 +353,7 @@ class cIBMWebSphereAppServerProfile {
                             }
                         }
                         $wasWinSvcName = New-IBMWebSphereAppServerWindowsService -ProfilePath $dmgrProfilePath -ServerName "dmgr" `
-                                            -WASEdition ND -WebSphereAdministratorCredential -StartupType Automatic $this.AdminCredential
+                                            -WASEdition ND -WebSphereAdministratorCredential $this.AdminCredential -StartupType Automatic
                         if ($wasWinSvcName -and (Get-Service -DisplayName $wasWinSvcName)) {
                             Write-Verbose "IBM WebSphere DMGR Windows Service configured successfully, starting it"
                             
