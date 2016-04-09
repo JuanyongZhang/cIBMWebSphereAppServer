@@ -150,7 +150,7 @@ Function Get-IBMWebSphereAppServerRegistryPath() {
         $Version = "8.5.0.0"
     )
 
-    Write-Verbose "Get-IBMWebSphereAppServerRegistryPath::ENTRY(WASEdition=$WASEdition,Version=$Version)"
+    Write-Debug "Get-IBMWebSphereAppServerRegistryPath::ENTRY(WASEdition=$WASEdition,Version=$Version)"
     
     $wasProductName = $null
     switch ($WASEdition) {
@@ -163,7 +163,7 @@ Function Get-IBMWebSphereAppServerRegistryPath() {
 
     $wasPath = Get-IBMWebSphereProductRegistryPath $wasProductName $Version
     
-    Write-Verbose "Get-IBMWebSphereAppServerRegistryPath returning path: $wasPath"
+    Write-Debug "Get-IBMWebSphereAppServerRegistryPath returning path: $wasPath"
     
     Return $wasPath
 }
@@ -184,7 +184,7 @@ Function Get-IBMWebSphereAppServerInstallLocation() {
         $Version = "8.5.0.0"
     )
 
-    Write-Verbose "Get-IBMWebSphereAppServerInstallLocation::ENTRY(WASEdition=$WASEdition,Version=$Version)"
+    Write-Debug "Get-IBMWebSphereAppServerInstallLocation::ENTRY(WASEdition=$WASEdition,Version=$Version)"
     
     $wasPath = Get-IBMWebSphereAppServerRegistryPath -WASEdition $WASEdition -Version $Version
     if ($wasPath -and $wasPath.StartsWith("HKU:")) {
@@ -202,6 +202,37 @@ Function Get-IBMWebSphereAppServerInstallLocation() {
 }
 
 ##############################################################################################################
+# Get-IBMWASProfilePath
+#   Returns the location of the profile specified
+##############################################################################################################
+Function Get-IBMWASProfilePath() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    param (
+        [parameter(Mandatory=$true,position=0)]
+        [String] $ProfileName,
+
+        [parameter(Mandatory=$false,position=1)]
+        [WASEdition] $WASEdition = [WASEdition]::ND
+    )
+    [string] $profilePath = $null
+    $wasInstDir = Get-IBMWebSphereAppServerInstallLocation $WASEdition
+    if ($wasInstDir -and (Test-Path($wasInstDir) -PathType Container)) {
+        try {
+            $profileProc = Invoke-ManageProfiles -WASAppServerPath $wasInstDir -Commands @("-getPath", "-profileName", $ProfileName)
+        } catch {
+            Write-Warning "An exception occurred while retriving profile. Profile named $ProfileName not found"
+        }
+        if ($profileProc -and $profileProc.StdOut -and (Test-Path($profileProc.StdOut.Trim()))) {
+            $profilePath = $profileProc.StdOut.Trim()
+        } else {
+            Write-Warning "Profile named $ProfileName not found"
+        }
+    }
+    
+    Return $profilePath
+}
+
+##############################################################################################################
 # Get-IBMWebSphereProductVersionInfo
 #   Returns a hashtable containing version information of the IBM Products installed in the specified product
 #   directory
@@ -214,7 +245,7 @@ Function Get-IBMWebSphereProductVersionInfo() {
         $ProductDirectory
     )
 
-    Write-Verbose "Get-IBMWebSphereProductVersionInfo::ENTRY(ProductDirectory=$ProductDirectory)"
+    Write-Debug "Get-IBMWebSphereProductVersionInfo::ENTRY(ProductDirectory=$ProductDirectory)"
     
     #Validate Parameters
     [string] $versionInfoBat = Join-Path -Path $ProductDirectory -ChildPath "bin\versionInfo.bat"
@@ -380,9 +411,17 @@ Function Install-IBMWebSphereAppServerFixpack() {
         $appServerDir = Join-Path -Path $appServerDir -ChildPath "AppServer"
     }
     
+    # Stop all servers
+    Stop-AllWebSphereServers
+    
     $updated = Install-IBMProductViaCmdLine -ProductId $productId -InstallationDirectory $appServerDir `
         -SourcePath $SourcePath -SourcePathCredential $SourcePathCredential -ErrorAction Stop
-
+    
+    if ($updated) {
+        # Start all servers
+        Start-AllWebSphereServers
+    }
+    
     Return $updated
 }
 
@@ -775,20 +814,24 @@ Function New-IBMWebSphereProfile() {
         
         [String] $HostName,
         
+        [String] $ServerName,
+        
         [String] $TemplatePath,
+        
+        [Bool] $EnableSecurity,
         
         [System.Management.Automation.PSCredential] $AdminCredential,
         
-        [switch] $Dmgr,
-
         [String] $DmgrHost,
         
-        [String] $DmgrPort
+        [Int] $DmgrPort = 8879,
+        
+        [Bool] $isMgmt
     )
 
     [bool] $profileCreated = $false
     
-    if (!($Dmgr) -and (!($DmgrHost) -or (!$DmgrPort) -or (!$AdminCredential))) {
+    if (!($isMgmt) -and (!($DmgrHost) -or (!$AdminCredential))) {
         Write-Error "Unable to create profile. Dmgr settings not specified correctly"
     }
     
@@ -802,20 +845,11 @@ Function New-IBMWebSphereProfile() {
         $ProfilePath = Join-Path $WASAppServerHome -ChildPath "profiles\$ProfileName"
     }
     
-    [string] $fullTemplatePath = $null
-    if (!$TemplatePath -and $Dmgr) {
-        $fullTemplatePath = Join-Path -Path $WASAppServerHome -ChildPath "profileTemplates\management"
-    } elseif (!$TemplatePath) {
-        $fullTemplatePath = Join-Path -Path $WASAppServerHome -ChildPath "profileTemplates\managed"
-    } else {
-        $fullTemplatePath = $TemplatePath
-    }
     
     [string[]] $profileCmd = @('-create')
-    $profileCmd += ('-templatePath', ('"' + $fullTemplatePath + '"'))
+    $profileCmd += ('-templatePath', ('"' + $TemplatePath + '"'))
     $profileCmd += ('-profileName', $ProfileName)
     $profileCmd += ('-profilePath', $ProfilePath)
-    $profileCmd += ('-nodeName', $NodeName)
     
     if ($CellName) {
         $profileCmd += ('-cellName', $CellName)
@@ -823,27 +857,35 @@ Function New-IBMWebSphereProfile() {
     if ($HostName) {
         $profileCmd += ('-hostName', $HostName)
     }
+    if ($ServerName -and (!$isMgmt)) {
+    	$profileCmd += ('-serverName', $ServerName)
+    }
     
-    if ($Dmgr) {
-        if ($AdminCredential) {
-            $adminUserName = $AdminCredential.UserName
-            $adminPwd = $AdminCredential.GetNetworkCredential().Password
-            $profileCmd += ('-enableAdminSecurity', 'true')
-            $profileCmd += ('-adminUserName', $adminUserName)
-            $profileCmd += ('-adminPassword', ('"' + $adminPwd + '"'))
+    
+    if ($AdminCredential) {
+        $adminUserName = $AdminCredential.UserName
+        $adminPwd = $AdminCredential.GetNetworkCredential().Password
+        
+        # Security should be enabled by default on dmgr profiles or if enable security is specified
+        if ($EnableSecurity -or $isMgmt) {
+			$profileCmd += ('-enableAdminSecurity', 'true')
+	        $profileCmd += ('-adminUserName', $adminUserName)
+	        $profileCmd += ('-adminPassword', ('"' + $adminPwd + '"'))
         }
-    } else {
-        if ($DmgrHost) {
-            $profileCmd += ('-dmgrHost', $DmgrHost)
-        }
-        if ($DmgrPort) {
-            $profileCmd += ('-dmgrPort', $DmgrPort)
-        }
-        if ($AdminCredential) {
-            $adminUserName = $AdminCredential.UserName
-            $adminPwd = $AdminCredential.GetNetworkCredential().Password
+        # If is not a dmgr profile, you need to specified the dmgr authentication information
+        if (!$isMgmt) {
             $profileCmd += ('-dmgrAdminUserName', $adminUserName)
             $profileCmd += ('-dmgrAdminPassword', ('"' + $adminPwd + '"'))
+        }
+    }
+    
+    # If is not a dmgr profile, specify the host/port
+    if (!$isMgmt) {
+        if ($DmgrHost -and $DmgrPort) {
+            $profileCmd += ('-dmgrHost', $DmgrHost)
+            $profileCmd += ('-dmgrPort', $DmgrPort)
+        } else {
+            Write-Warning "Attempting to create a profile without specifying dmgr host/port"
         }
     }
     
@@ -950,6 +992,27 @@ Function Stop-AllWebSphereServers {
             Stop-Service $_
         } else {
             Write-Verbose "WebSphere Server: $currSvcName. already stopped"
+        }
+    }
+}
+
+##############################################################################################################
+# Start-AllWebSphereServers
+#   Starts all the WebSphere Application Servers using its Windows Service
+##############################################################################################################
+Function Start-AllWebSphereServers {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+	Param()
+	
+	Write-Verbose "Starting All WebSphere Servers"
+    $wasSvcName = "*" + $WAS_SVC_PREFIX + "*"
+    Get-Service -DisplayName $wasSvcName | Foreach {
+        $currSvcName = $_.DisplayName 
+        if ($_.Status -ne "Running") {
+            Write-Verbose "Starting WebSphere Server: $currSvcName via Windows Service"
+            Start-Service $_
+        } else {
+            Write-Verbose "WebSphere Server: $currSvcName. already started"
         }
     }
 }

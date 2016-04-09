@@ -14,6 +14,15 @@ enum WASEdition {
     Liberty
 }
 
+enum ProfileType {
+	Cell
+	Default
+	Dmgr
+	Managed
+	Management
+	Secureproxy
+}
+
 <#
    DSC resource to manage the installation of IBM WebSphere Application Server.
    Key features: 
@@ -318,16 +327,22 @@ class cIBMWebSphereAppServerProfile {
     [String] $TemplatePath
     
     [DscProperty()]
-    [System.Management.Automation.PSCredential] $AdminCredential
+    [Bool] $EnableSecurity = $true
     
     [DscProperty()]
-    [Bool] $IsDmgr = $false
+    [String] $ServerName = "server1"
+    
+    [DscProperty()]
+    [ProfileType] $ProfileType = [ProfileType]::Default
+    
+    [DscProperty()]
+    [System.Management.Automation.PSCredential] $AdminCredential
     
     [DscProperty()]
     [String] $DmgrHost
     
     [DscProperty()]
-    [String] $DmgrPort
+    [Int] $DmgrPort
     
     # Sets the desired state of the resource.
     [void] Set() {
@@ -335,41 +350,66 @@ class cIBMWebSphereAppServerProfile {
             if ($this.Ensure -eq [Ensure]::Present) {
                 Write-Verbose -Message ("Creating WebSphere Profile: " + $this.ProfileName)
                 [bool] $created = $false
-                if ($this.IsDmgr) {
-                    $created = New-IBMWebSphereProfile -ProfileName $this.ProfileName -ProfilePath $this.ProfilePath -Dmgr `
-                                -NodeName $this.NodeName -CellName $this.CellName -HostName $this.HostName `
-                                -TemplatePath $this.TemplatePath -AdminCredential $this.AdminCredential -ErrorAction Stop
-                    if ($created) {
-                        $created = $false
-                        # Create a windows service for Dmgr
-                        [string] $dmgrProfilePath = $this.ProfilePath
-                        if (!$this.ProfilePath) {
-                            $appServerDir = Get-IBMWebSphereAppServerInstallLocation ND
-                            $results = Invoke-ManageProfiles -WASAppServerPath $appServerDir -Commands @("-getPath", "-profileName", $this.ProfileName)
-                            if ($results -and $results.StdOut) {
-                                $dmgrProfilePath = $results.StdOut.Trim()
-                            } else {
-                                Write-Error ("Unable to retrieve path for profile: " + $this.ProfilePath)
-                            }
-                        }
-                        $wasWinSvcName = New-IBMWebSphereAppServerWindowsService -ProfilePath $dmgrProfilePath -ServerName "dmgr" `
-                                            -WASEdition ND -WebSphereAdministratorCredential $this.AdminCredential -StartupType Automatic
-                        if ($wasWinSvcName -and (Get-Service -DisplayName $wasWinSvcName)) {
-                            Write-Verbose "IBM WebSphere DMGR Windows Service configured successfully, starting it"
-                            
-                            # Start Deployment Manager
-                            Start-WebSphereDmgr -DmgrProfileDir $dmgrProfilePath -WebSphereAdministratorCredential $this.AdminCredential
-                            $created = $true
-                        } else {
-                            Write-Warning "IBM WebSphere DMGR was not installed correctly (Windows Service Does Not Exists).  Please check the installation logs"
-                        }
-                    }
-                } else {
-                   $created = New-IBMWebSphereProfile -ProfileName $this.ProfileName -ProfilePath $this.ProfilePath `
-                                -NodeName $this.NodeName -CellName $this.CellName -HostName $this.HostName `
-                                -TemplatePath $this.TemplatePath -AdminCredential $this.AdminCredential `
-                                -DmgrHost $this.DmgrHost -DmgrPort $this.DmgrPort -ErrorAction Stop
+                
+                $isMgmt = ($this.ProfileType -eq [ProfileType]::Management)
+                if ($isMgmt) {
+                	$this.ServerName = "dmgr"
                 }
+                
+                $appServerDir = Get-IBMWebSphereAppServerInstallLocation ND
+                if (!$this.TemplatePath) {
+                	$this.TemplatePath = Join-Path -Path $appServerDir -ChildPath ("profileTemplates\" + $this.ProfileType) 
+                }
+                
+                Write-Verbose -Message ("Creating WebSphere Profile using template: " + $this.TemplatePath)
+				
+                $created = New-IBMWebSphereProfile `
+                				-ProfileName $this.ProfileName `
+                				-ProfilePath $this.ProfilePath `
+                                -NodeName $this.NodeName `
+                                -CellName $this.CellName `
+                                -HostName $this.HostName `
+                                -TemplatePath $this.TemplatePath `
+                                -AdminCredential $this.AdminCredential `
+                                -EnableSecurity $this.EnableSecurity `
+                                -DmgrHost $this.DmgrHost `
+				                -DmgrPort $this.DmgrPort `
+				                -ServerName $this.ServerName `
+                                -isMgmt $isMgmt `
+                                -ErrorAction Stop
+
+                # If the profiles are default/management a server will be created, go ahead and create a windows service for it and start it
+				if ($created -and (($this.ProfileType -eq [ProfileType]::Default) -or ($this.ProfileType -eq [ProfileType]::Management))) {
+					$created = $false
+					
+					if (!$this.ProfilePath) {
+						$this.ProfilePath = Get-IBMWASProfilePath $this.ProfileName ND
+					}
+                    
+                    if (!(Test-Path $this.ProfilePath)) {
+                        Write-Error "Invalid profile directory, it does not exist"
+                    }
+					
+					$wasWinSvcName = New-IBMWebSphereAppServerWindowsService `
+										-ProfilePath $this.ProfilePath `
+										-ServerName $this.ServerName `
+										-WebSphereAdministratorCredential $this.AdminCredential `
+										-WASEdition ND -StartupType Automatic
+					Write-Verbose -Message ("New-IBMWebSphereAppServerWindowsService created: $wasWinSvcName")
+					
+                    if ($wasWinSvcName -and (Get-Service -DisplayName $wasWinSvcName)) {
+                        Write-Verbose "IBM WebSphere Windows Service [$wasWinSvcName] configured successfully, starting it"
+                        if($isMgmt){
+	                        Start-WebSphereDmgr -DmgrProfileDir $this.ProfilePath `
+	                        	-WebSphereAdministratorCredential $this.AdminCredential
+                        } else {
+                        	Start-WebSphereServer -ServerName $this.ServerName
+                        }
+                        $created = $true
+                    } else {
+                        Write-Warning "IBM WebSphere Profile was not installed correctly (Windows Service Does Not Exists).  Please check the installation logs"
+                    }
+				}
                 if ($created) {
                     Write-Verbose ("WebSphere profile " + $this.ProfileName + " created/configured successfully")
                 } else {
@@ -417,38 +457,20 @@ class cIBMWebSphereAppServerProfile {
         $RetProfilePath = $null
         
         $RetInsDir = Get-IBMWebSphereAppServerInstallLocation ND
-        
+        Write-Verbose "WAS is installed at: $RetInsDir"
         if($RetInsDir -and (Test-Path($RetInsDir))) {
-            $results = Invoke-ManageProfiles -WASAppServerPath $RetInsDir -Commands "-listProfiles"
-            if ($results -and $results.StdOut) {
-                [string] $stdOut = $results.StdOut.Trim()
-                if ([string]::IsNullOrEmpty($stdOut) -or $stdOut -eq "[]") {
-                    Write-Verbose "No profiles found"
-                } else {
-                    $profiles = $stdOut
-                    if ($stdOut.StartsWith('[')) {
-                        $profiles = $stdOut.Substring(1,($stdOut.Length-2)) -split ','
-                    }
-                    $RetProfileName = (&{if($profiles.IndexOf($this.ProfileName) -ge 0) {$this.ProfileName} else {$null}})
-                    if ($RetProfileName) {
-                        $RetEnsure = [Ensure]::Present
-                        $results = Invoke-ManageProfiles -WASAppServerPath $RetInsDir `
-                                    -Commands @("-getPath", "-profileName", $RetProfileName)
-                        if ($results -and $results.StdOut) {
-                            $RetProfilePath = $results.StdOut.Trim()
-                        } else {
-                            Write-Error "Unable to retrieve path for profile: $RetProfileName"
-                        }
-                    }
-                }
+        	$RetProfilePath = Get-IBMWASProfilePath $this.ProfileName ND
+            if ($RetProfilePath -and (Test-Path $RetProfilePath)) {
+            	$RetProfileName = $this.ProfileName
+            	$RetEnsure = [Ensure]::Present
+            	Write-Verbose "Found Existing Profile $RetProfileName at $RetProfilePath"
+            } else {
+                Write-Verbose "No profiles found : $RetProfileName"
             }
         } else {
             Write-Verbose "IBM WebSphere Application Server is NOT Present"
         }
         
-        Write-Verbose "----------------ProfileName: $RetProfileName"
-        Write-Verbose "----------------ProfilePath: $RetProfilePath"
-
         $returnValue = @{
             WASAppServerHome = $RetInsDir
             ProfileName = $RetProfileName
