@@ -9,7 +9,7 @@
 RootModule = 'cIBMWebSphereAppServer.psm1'
 
 # Version number of this module.
-ModuleVersion = '1.0.5'
+ModuleVersion = '1.0.6'
 
 # ID used to uniquely identify this module
 GUID = '325e1620-53fc-43bd-8380-80f702c2e8c0'
@@ -21,7 +21,7 @@ GUID = '325e1620-53fc-43bd-8380-80f702c2e8c0'
 NestedModules = @('cIBMWebSphereAppServerUtils')
 
 # DSC resources to export from this module
-DscResourcesToExport = @('cIBMWebSphereAppServer', 'cIBMWebSphereAppServerFixpack', 'cIBMWebSphereAppServerProfile')
+DscResourcesToExport = @('cIBMWebSphereAppServer', 'cIBMWebSphereAppServerFixpack', 'cIBMWebSphereAppServerProfile', 'cIBMWebSphereJVMSettings')
 
 # Author of this module
 Author = 'Denny Pichardo'
@@ -42,7 +42,7 @@ ProcessorArchitecture = 'None'
 PowerShellVersion = '5.0'
 
 # Modules that must be imported into the global environment prior to importing this module
-RequiredModules = @(@{ ModuleName = 'cIBMInstallationManager'; ModuleVersion = '1.0.4'})
+RequiredModules = @(@{ ModuleName = 'cIBMInstallationManager'; ModuleVersion = '1.0.6'})
 
 # Name of the Windows PowerShell host required by this module
 # PowerShellHostName = ''
@@ -101,7 +101,7 @@ PrivateData = @{
         # IconUri = ''
 
         # ReleaseNotes of this module
-        ReleaseNotes = 'Minor fixes, Start/Stop CmdLets'
+        ReleaseNotes = 'New dsc module for managing JVM settings, various enhancements and bug fixes'
 
     } # End of PSData hashtable
 

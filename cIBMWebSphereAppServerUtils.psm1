@@ -1487,38 +1487,31 @@ Function Import-IBMWebSpherePropertyBasedConfig() {
 
 ##############################################################################################################
 # Export-IBMWebSpherePropertyBasedConfig
-#   Extracts properties to a file based on the Resource Id
+#   Extracts properties to a file based on the Resource Id or Config Data, returns true if extracted
 ##############################################################################################################
 Function Export-IBMWebSpherePropertyBasedConfig() {
     [CmdletBinding(SupportsShouldProcess=$False)]
     param (
         [parameter(Mandatory = $true, position=0)]
-		[System.String]
-		$ProfilePath,
+		[String] $ProfilePath,
         
         [parameter(Mandatory = $false, position=2)]
-		[String]
-		$ResourceId,
+		[String] $ResourceId,
 
         [parameter(Mandatory = $false, position=3)]
-		[Hashtable]
-		$ConfigData,
+		[Hashtable] $ConfigData,
         
         [Parameter(Mandatory = $true, position=4)]
-        [System.Management.Automation.PSCredential]
-        $WebSphereAdministratorCredential,
+        [PSCredential] $WebSphereAdministratorCredential,
 
         [parameter(Mandatory = $true, position=5)]
-		[String]
-		$TargetPropertyFile,
+		[String] $TargetPropertyFile,
         
         [parameter(Mandatory = $false, position=6)]
-        [PBCFilter]
-        $FilterMechanism,
+        [PBCFilter] $FilterMechanism,
         
         [parameter(Mandatory = $false, position=7)]
-		[String[]]
-		$SelectedSubTypes
+		[String[]] $SelectedSubTypes
     )
 
     if ((!($ResourceId)) -and (!($ConfigData))) {
@@ -1526,7 +1519,7 @@ Function Export-IBMWebSpherePropertyBasedConfig() {
     }
 
     [string[]] $wsadminCommands = @()
-    $extractArgs = $null
+    [string] $extractArgs = $null
     if ($ResourceId) {
         $wsadminCommands += ("rsrcID = '" + $ResourceId + "'")
         $extractArgs = "rsrcID, '-propertiesFileName " + $TargetPropertyFile + "'"
@@ -1535,15 +1528,22 @@ Function Export-IBMWebSpherePropertyBasedConfig() {
         foreach ($configKey in $ConfigData.Keys) {
             $configDataStr += (" " + $configKey + "=" + $ConfigData[$configKey])
         }
-        $extractArgs = "'[-propertiesFileName" + $configDataStr + "]'"
+        $extractArgs = "'[-propertiesFileName " + $TargetPropertyFile + " -configData" + $configDataStr
+        if ($FilterMechanism -eq [PBCFilter]::SELECTED_SUBTYPES) {
+            $extractArgs += " -filterMechanism SELECTED_SUBTYPES -selectedSubTypes ["
+            $extractArgs += ($SelectedSubTypes -join " ") + "]"
+        }
+        $extractArgs += " -options [[PortablePropertiesFile true]]"
+        $extractArgs += "]'"
     }
 
     $extractTask = "AdminTask.extractConfigProperties(" + $extractArgs + ")"
+    $extractTask | Out-Host
     $wsadminCommands += $extractTask
 
     $wsadminProcess = Invoke-WsAdmin -ProfilePath $ProfilePath -Commands $wsadminCommands -WebSphereAdministratorCredential $WebSphereAdministratorCredential
 
-    Return ($wsadminProcess.ExitCode -eq '0')
+    Return ($wsadminProcess -and ($wsadminProcess.ExitCode -eq '0'))
 }
 
 ##############################################################################################################
@@ -1554,50 +1554,49 @@ Function Test-IBMWebSpherePropertyBasedConfig() {
     [CmdletBinding(SupportsShouldProcess=$False)]
     param (
         [parameter(Mandatory = $true, position=0)]
-		[String]
-		$ProfilePath,
+		[String] $ProfilePath,
         
         [parameter(Mandatory = $true, position=1)]
-		[String]
-		$PropertyFile,
+		[String] $PropertyFile,
         
         [Parameter(Mandatory = $true, position=2)]
-        [System.Management.Automation.PSCredential]
-        $WebSphereAdministratorCredential,
+        [PSCredential] $WebSphereAdministratorCredential,
         
         [parameter(Mandatory = $false, position=3)]
-		[String]
-		$VariablesMapFile,
+		[String] $VariablesMapFile,
         
         [parameter(Mandatory = $false, position=4)]
-		[Hashtable]
-		$VariablesMap,
+		[Hashtable] $VariablesMap,
         
         [parameter(Mandatory = $false, position=5)]
-		[String]
-		$ReportFile
+		[String] $ReportFile
 	)
 
     if (!(Test-Path $PropertyFile -PathType Leaf)) {
         Write-Error "You must specified a valid properties file. Invalid file: $ProfileFile"
     }
+    $configIsValid = $false
 
     [string[]] $wsadminCommands = @()
     [string[]] $validateArgs = @()
-    $validateArgs += ("-propertiesFileName", $PropertyFile)
-    if ($ReportFile) {
-        $validateArgs += ("-reportFileName", $ReportFile, "-reportFilterMechanism", "Errors_And_Changes")
+    $validateArgs += ("-propertiesFileName", ('\"' + $PropertyFile.Replace("\","\\") + '\"'))
+    # If report file is not specified use temp and remove it
+    $deleteReportFile = $false
+    if (!($ReportFile)) {
+        $ReportFile = Join-Path (Get-IBMTempDir) "validateProperties-$(get-date -f yyyyMMddHHmmss).txt"
+        $deleteReportFile = $true
     }
+    $validateArgs += ("-reportFileName", ('\"' + $ReportFile.Replace("\","\\") + '\"'), "-reportFilterMechanism", "Errors_And_Changes")
     if ($VariablesMapFile) {
-        $validateArgs += ("-variablesMapFileName", $VariablesMapFile)
+        $validateArgs += ("-variablesMapFileName", ('\"' + $VariablesMapFile.Replace("\","\\") + '\"'))
     }
     if ($VariablesMap) {
-        $variableStr = "[["
+        $variableStr = "["
         foreach ($varKey in $VariablesMap.Keys) {
-            $variableStr += ($varKey + " " + $VariablesMap[$varKey] + " ")
+            $variableStr += "[" + ($varKey + " " + $VariablesMap[$varKey] + "]")
         }
         $variableStr = $variableStr.Trim()
-        $variableStr += "]]"
+        $variableStr += "]"
         $validateArgs += ("-variablesMap", $variableStr)
     }
 
@@ -1607,7 +1606,27 @@ Function Test-IBMWebSpherePropertyBasedConfig() {
 
     $wsadminProcess = Invoke-WsAdmin -ProfilePath $ProfilePath -Commands $wsadminCommands -WebSphereAdministratorCredential $WebSphereAdministratorCredential
 
-    Return $wsadminProcess
+    if ($wsadminProcess -and ($wsadminProcess.StdOut -and $wsadminProcess.StdOut -eq "'true'")) {
+        gc $ReportFile | Foreach-Object {
+            $currLine = ([string]$_).Trim()
+            if ($currLine.Length -gt 0) {
+                if (([string]$_).StartsWith("ADMG0824I")) {
+                    $configIsValid = $true
+                } elseif (!([string]$_).StartsWith("ADMG0825I")) {
+                    $configIsValid = $false
+                }
+            }
+        }
+        if (!$configIsValid) {
+            [string[]] $output = (gc $ReportFile)
+            Write-Warning ($output -join [environment]::NewLine)
+        }
+        if ((Test-Path $ReportFile) -and $deleteReportFile) {
+            rm $ReportFile -Force | Out-Null
+        }
+    }
+
+    Return $configIsValid
 }
 
 ##############################################################################################################
@@ -1645,31 +1664,64 @@ Function Set-IBMWebSpherePropertyBasedConfig() {
     if (!(Test-Path $PropertyFile -PathType Leaf)) {
         Write-Error "You must specified a valid properties file. Invalid file: $ProfileFile"
     }
+    
+    $configApplied = $false
 
     [string[]] $wsadminCommands = @()
     [string[]] $applyArgs = @()
-    $applyArgs += ("-propertiesFileName", $PropertyFile)
-    if ($ReportFile) {
-        $applyArgs += ("-reportFileName", $ReportFile, "-reportFilterMechanism", "Errors_And_Changes")
+    $applyArgs += ("-propertiesFileName", ('\"' + $PropertyFile.Replace("\","\\") + '\"'))
+    # If report file is not specified use temp and remove it
+    $deleteReportFile = $false
+    if (!($ReportFile)) {
+        $ReportFile = Join-Path (Get-IBMTempDir) "tempProperties-$(get-date -f yyyyMMddHHmmss).txt"
+        $deleteReportFile = $true
     }
+    $applyArgs += ("-reportFileName", ('\"' + $ReportFile.Replace("\","\\") + '\"'), "-reportFilterMechanism", "Errors_And_Changes")
+    
     if ($VariablesMapFile) {
-        $applyArgs += ("-variablesMapFileName", $VariablesMapFile)
+        $applyArgs += ("-variablesMapFileName", ('\"' + $VariablesMapFile.Replace("\","\\") + '\"'))
     }
     if ($VariablesMap) {
-        $variableStr = "[["
+        $variableStr = "["
         foreach ($varKey in $VariablesMap.Keys) {
-            $variableStr += ($varKey + " " + $VariablesMap[$varKey] + " ")
+            $variableStr += "[" + ($varKey + " " + $VariablesMap[$varKey] + "]")
         }
         $variableStr = $variableStr.Trim()
-        $variableStr += "]]"
+        $variableStr += "]"
         $applyArgs += ("-variablesMap", $variableStr)
     }
 
     $applyArgsStr = "'[" + ($applyArgs -join " ") + "]'"
     $applyTask = "AdminTask.applyConfigProperties(" + $applyArgsStr + ")"
     $wsadminCommands += $applyTask
-
+    
     $wsadminProcess = Invoke-WsAdmin -ProfilePath $ProfilePath -Commands $wsadminCommands -WebSphereAdministratorCredential $WebSphereAdministratorCredential
+    
+    if ($wsadminProcess -and ($wsadminProcess.StdOut -and $wsadminProcess.StdOut -eq "''")) {
+        [int] $configCounter = 0
+        gc $ReportFile | Foreach-Object {
+            $currLine = ([string]$_).Trim()
+            if ($currLine.Length -gt 0) {
+                if ($currLine.StartsWith("ADMG0824I")) {
+                    $configCounter++
+                } elseif ($currLine.StartsWith("ADMG0825I")) {
+                    $configCounter++
+                } elseif ($currLine.StartsWith("ADMG0820I")) {
+                    $configCounter++
+                } elseif ($currLine.StartsWith("ADMG0821I")) {
+                    $configCounter++
+                }   
+            }
+        }
+        $configApplied = ($configCounter -eq 4)
+        if (!$configApplied) {
+            [string[]] $output = (gc $ReportFile)
+            Write-Error ($output -join [environment]::NewLine)
+        }
+        if ((Test-Path $ReportFile) -and $deleteReportFile) {
+            rm $ReportFile -Force | Out-Null
+        }
+    }
 
-    Return $wsadminProcess
+    Return $configApplied
 }

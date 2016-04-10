@@ -12,6 +12,7 @@ PS> Install-Module -Name cIBMWebSphereAppServer
 * **cIBMWebSphereAppServer** installs IBM WebSphere Application Server on target machine.
 * **cIBMWebSphereAppServerFixpack** applies a Websphere Fixpack on the target machine
 * **cIBMWebSphereAppServerProfile** creates a WebSphere profile.
+* **cIBMWebSphereJVMSettings** manages the JVM settings of a WebSphere server.
 
 ### cIBMWebSphereAppServer
 
@@ -48,9 +49,22 @@ If you create your own Response File template it is expected that the template h
 * **HostName**: FQDN of the host in the target machine.
 * **TemplatePath**: (Optional) full path to the template to be used for creating this profile
 * **AdminCredential**: (Optional) Credential to be used to create the profiles (if applicable)
-* **IsDmgr**: Boolean that detimines if the profile to be created is of type of Dmgr or not.
-* **DmgrHost**: If not Dmgr, the hostname of the Dmgr
-* **DmgrPort**: If not Dmgr, the SOAP port of the Dmgr, usually 8879
+* **EnableSecurity**: Determines whether or not the profile should have security enable.  Default is true
+* **ServerName**: The name of the application server if the profile type is not Management or Dmgr
+* **ProfileType**: The type of profile (maps to profiles withing the profileTemplates directory)
+* **DmgrHost**: If not management profile, the hostname of the Dmgr
+* **DmgrPort**: If not management profile, the SOAP port of the Dmgr.  Default: 8879
+
+### cIBMWebSphereJVMSettings
+* **Ensure**: (Required) Ensures that WAS profile is Present or Absent on the machine.
+* **ProfileName**: (Required) The name of the profile
+* **NodeName**: (Required) The name of the WebSphere Node that the server belongs to
+* **CellName**: (Required) The name of the WebSphere Cell that the server belongs to
+* **ServerName**: (Key) The name of the application server
+* **MinHeapSize**: The minimum JVM heap size in MB. Default 1024MB
+* **MaxHeapSize**: The maximum JVM heap size in MB. Default 2048MB
+* **VerboseGC**: Enable verbose garbage collection (useful to help monitor memory usage)
+* **WebSphereAdministratorCredential**: (Required) Credential to be used to apply changes
 
 ## Depedencies
 * [cIBMInstallationManager](http://github.com/dennypc/cIBMInstallationManager) DSC Resource/CmdLets for IBM Installation Manager
@@ -58,6 +72,10 @@ If you create your own Response File template it is expected that the template h
 DSC Resource or by leveraging the [x7Zip DSC Module](https://www.powershellgallery.com/packages/x7Zip/ "x7Zip at PowerShell Gallery")
 
 ## Versions
+
+### 1.0.6
+* New DSC Resource for managing JVM settings **cIBMWebSphereJVMSettings**
+* Fixes various bugs in profile managment and property-based config cmdlets
 
 ### 1.0.5
 * Minor fixes

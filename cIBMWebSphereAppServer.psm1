@@ -481,3 +481,107 @@ class cIBMWebSphereAppServerProfile {
         return $returnValue
     }
 }
+
+<#
+   DSC resource to manage JVM settings of an IBM WebSphere Application Server.
+#>
+
+[DscResource()]
+class cIBMWebSphereJVMSettings {
+    [DscProperty(Mandatory)]
+    [Ensure] $Ensure
+    
+    [DscProperty(Mandatory)]
+    [String] $ProfileName
+    
+    [DscProperty(Key)]
+    [String] $ServerName
+    
+    [DscProperty(Mandatory)]
+    [String] $NodeName
+    
+    [DscProperty(Mandatory)]
+    [String] $CellName
+    
+    [DscProperty()]
+    [Int] $MinHeapSize = 1024
+    
+    [DscProperty()]
+    [Int] $MaxHeapSize = 2048
+    
+    [DscProperty()]
+    [Boolean] $VerboseGC = $false
+    
+    [DscProperty(Mandatory)]
+    [PSCredential] $WebSphereAdministratorCredential
+    
+    <#
+        Applies the JVM Settings
+    #>
+    [void] Set () {
+        try {
+            if ($this.Ensure -eq [Ensure]::Present) {
+                Write-Verbose -Message ("Applying WebSphere JVM settings")
+                $profilePath = Get-IBMWASProfilePath $this.ProfileName
+                if ($profilePath) {
+                    $varData = $this.InitializeVariableData()
+                    $configApplied = Set-IBMWebSpherePropertyBasedConfig -ProfilePath $profilePath `
+                            -VariablesMap $varData -PropertyFile $this.GetPBCTemplatePath() `
+                            -WebSphereAdministratorCredential $this.WebSphereAdministratorCredential
+                    if ($configApplied) {
+                        Write-Verbose "Configuration applied successfully, restarting server"
+                        Stop-WebSphereServer $this.ServerName
+                        Start-WebSphereServer $this.ServerName
+                    }
+                } else {
+                    Write-Error "Invalid WebSphere Profile: $profilePath"
+                }
+            } else {
+                Write-Verbose "Removing configuration (Not Yet Implemented)"
+            }
+        } catch {
+            Write-Error -ErrorRecord $_ -ErrorAction Stop
+        }
+    }
+
+    <#
+        Performs test to check if the WAS JVM has the desired state
+    #>
+    [bool] Test () {
+        Write-Verbose "Checking for WebSphere JVM Settings"
+        $profilePath = Get-IBMWASProfilePath $this.ProfileName
+        $varData = $this.InitializeVariableData()
+        if (!(Test-WebSphereServerService $this.ServerName)) {
+            Start-WebSphereServer $this.ServerName
+        }
+        $wasConfiguredCorrectly = Test-IBMWebSpherePropertyBasedConfig -ProfilePath $profilePath `
+                -VariablesMap $varData -PropertyFile $this.GetPBCTemplatePath() `
+                -WebSphereAdministratorCredential $this.WebSphereAdministratorCredential
+        return $wasConfiguredCorrectly
+    }
+    
+    [string] GetPBCTemplatePath() {
+        [string] $PbcFilePath = (Join-Path ($PSScriptRoot) "PropertyBasedConfigTemplates\JVMSettings.properties")
+        return $PbcFilePath
+    }
+    
+    [hashtable] InitializeVariableData() {
+        [hashtable] $varData= @{
+            "cellName" = $this.CellName
+            "nodeName" = $this.NodeName
+            "serverName" = $this.ServerName
+            "initialHeapSize" = $this.MinHeapSize
+            "maximumHeapSize" = $this.MaxHeapSize
+            "verboseModeGarbageCollection" = $this.VerboseGC
+        }
+        Return $varData
+    }
+
+    <#
+        Retrieves existing JVM settings
+    #>
+    [cIBMWebSphereJVMSettings] Get () {
+        # TODO - Not needed if using Property-Based Config
+        return $null
+    }
+}
