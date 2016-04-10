@@ -10,7 +10,7 @@ Configuration WASND
     
     Import-DscResource -ModuleName 'PSDesiredStateConfiguration'
     Import-DSCResource -ModuleName 'cIBMInstallationManager' -ModuleVersion '1.0.6'
-    Import-DSCResource -ModuleName 'cIBMWebSphereAppServer' -ModuleVersion '1.0.5'
+    Import-DSCResource -ModuleName 'cIBMWebSphereAppServer' -ModuleVersion '1.0.6'
     
     Package SevenZip {
         Ensure = 'Present'
