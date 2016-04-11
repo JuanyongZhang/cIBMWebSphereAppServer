@@ -379,23 +379,21 @@ Function Install-IBMWebSphereAppServerFixpack() {
     [CmdletBinding(SupportsShouldProcess=$False)]
     param (
         [parameter(Mandatory=$false)]
-        [WASEdition]
-        $WASEdition = [WASEdition]::Base,
+        [WASEdition] $WASEdition = [WASEdition]::Base,
 
         [parameter(Mandatory=$false)]
-        [System.Version]
-        $Version = "8.5.0.0",
+        [Version] $Version = "8.5.0.0",
         
         [parameter(Mandatory = $true)]
-		[System.String]
-    	$WebSphereInstallationDirectory,
+		[String] $WebSphereInstallationDirectory,
+        
+        [parameter(Mandatory = $true)]
+        [PSCredential] $WebSphereAdministratorCredential,
 
     	[parameter(Mandatory = $true)]
-		[System.String[]]
-		$SourcePath,
+		[String[]] $SourcePath,
 
-        [System.Management.Automation.PSCredential]
-		$SourcePathCredential
+        [PSCredential] $SourcePathCredential
 	)
     
     [string] $productId = $null
@@ -412,14 +410,20 @@ Function Install-IBMWebSphereAppServerFixpack() {
     }
     
     # Stop all servers
-    Stop-AllWebSphereServers
+    $serversStatus = Stop-AllWebSphereServers $WebSphereAdministratorCredential
     
     $updated = Install-IBMProductViaCmdLine -ProductId $productId -InstallationDirectory $appServerDir `
         -SourcePath $SourcePath -SourcePathCredential $SourcePathCredential -ErrorAction Stop
     
     if ($updated) {
-        # Start all servers
-        Start-AllWebSphereServers
+        # Start all servers that were stopped
+        $serversToSkip = @()
+        $serversStatus.GetEnumerator() | % {
+            if (!($_.Value)) {
+                $serversToSkip += $_.Name
+            }
+        }
+        Start-AllWebSphereServers $WebSphereAdministratorCredential $serversToSkip
     }
     
     Return $updated
@@ -976,24 +980,129 @@ Function Stop-WebSphereServer {
 }
 
 ##############################################################################################################
+# Get-IBMWASProfiles
+#   Returns a list containing the names of all the profiles installed
+##############################################################################################################
+Function Get-IBMWASProfiles() {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    param (
+        [parameter(Mandatory=$false,position=0)]
+        [WASEdition] $WASEdition = [WASEdition]::ND
+    )
+    [string[]] $profiles = @()
+    $wasInstDir = Get-IBMWebSphereAppServerInstallLocation $WASEdition
+    if ($wasInstDir -and (Test-Path($wasInstDir) -PathType Container)) {
+        try {
+            $profileProc = Invoke-ManageProfiles -WASAppServerPath $wasInstDir -Commands @("-listProfiles")
+        } catch {
+            Write-Warning "An exception occurred while listing profiles"
+        }
+        if ($profileProc -and $profileProc.StdOut) {
+            [string] $stdOut = $profileProc.StdOut.Trim()
+            if ([string]::IsNullOrEmpty($stdOut) -or $stdOut -eq "[]") {
+                Write-Warning "No profiles found"
+            } else {
+                if ($stdOut.StartsWith('[')) {
+                    $profiles = $stdOut.Substring(1,($stdOut.Length-2)).Split(",").Trim()
+                } else {
+                    $profiles += $stdOut
+                }
+            }
+        } else {
+            Write-Error "Error occurred while listing profiles"
+        }
+    }
+    
+    Return $profiles
+}
+
+##############################################################################################################
+# Get-WebSphereServerStatus
+#   Returns the status of the WebSphere Application Server specified or of all the servers in the profile
+##############################################################################################################
+Function Get-WebSphereServerStatus()  {
+    [CmdletBinding(SupportsShouldProcess=$False)]
+    Param (
+        [parameter(Mandatory=$true, Position=0)]
+        [string] $ProfileName,
+
+        [parameter(Mandatory=$true, Position=1)]
+        [PSCredential] $WebSphereAdministratorCredential,
+
+        [Parameter(Mandatory=$false, Position=2)]
+        [String] $ServerName
+    )
+    [hashtable] $servers = @{}
+    $started = $false
+    
+    
+    $profilePath = Get-IBMWASProfilePath $ProfileName
+    $profileBin = Join-Path -Path $profilePath -ChildPath "bin"
+    if (Test-Path($profileBin)) {
+        $serverStatusCmd = Join-Path -Path $profileBin -ChildPath "serverStatus.bat"
+        $serverToCheck = $ServerName
+        $allServers = $false
+        if (!($ServerName)) {
+            $serverToCheck = "-all"
+            $allServers = $true
+        }
+        $statusArgs = @($serverToCheck, "-username", $WebSphereAdministratorCredential.UserName, "-password", $WebSphereAdministratorCredential.GetNetworkCredential().Password)
+        $serverStatusProc = Invoke-ProcessHelper -ProcessFileName $serverStatusCmd -ProcessArguments $statusArgs -WorkingDirectory $profileBin
+        if ($serverStatusProc -and (!($serverStatusProc.StdErr))) {
+            if ($serverStatusProc.StdOut.Contains(" is STARTED") -or $serverStatusProc.StdOut.Contains("cannot be reached")) {
+                [string] $serverStr = 'Server "'
+                ($serverStatusProc.StdOut -split [environment]::NewLine) | ? {
+                    [string] $currLine = $_
+                    if ($currLine.Contains(": The Application Server")) {
+                        [int] $startIdx = ($currLine.IndexOf($serverStr) + $serverStr.Length)
+                        [int] $endIdx = $currLine.IndexOf('"', $startIdx + 1)
+                        $currentServer = $currLine.Substring($startIdx, ($endIdx - $startIdx))
+                        $started = $currLine.Contains(" is STARTED")
+                        $servers.Add($currentServer, $started)
+                    }
+                }
+            } else {
+                Write-Verbose ($serverStatusProc.StdOut)
+            }
+        } else {
+            Write-Error "An error occurred while executing the serverStatus.bat process"
+        }
+    } else {
+        Write-Error "Invalid profile directory"
+    }
+    if ($ServerName) {
+        Return $started
+    } else {
+        Return $servers
+    }
+}
+
+##############################################################################################################
 # Stop-AllWebSphereServers
 #   Stops the WebSphere Application Server using its Windows Service
 ##############################################################################################################
 Function Stop-AllWebSphereServers {
     [CmdletBinding(SupportsShouldProcess=$False)]
-	Param()
-	
+	Param(
+        [parameter(Mandatory=$true, Position=0)]
+        [PSCredential] $WebSphereAdministratorCredential
+    )
+	[hashtable] $serversStopped = @{}
 	Write-Verbose "Stopping All WebSphere Servers"
-    $wasSvcName = "*" + $WAS_SVC_PREFIX + "*"
-    Get-Service -DisplayName $wasSvcName | Foreach {
-        $currSvcName = $_.DisplayName 
-        if ($_.Status -ne "Stopped") {
-            Write-Verbose "Stopping WebSphere Server: $currSvcName via Windows Service"
-            Stop-Service $_
-        } else {
-            Write-Verbose "WebSphere Server: $currSvcName. already stopped"
+    Get-IBMWASProfiles | Foreach {
+        [string] $profileName = $_
+        (Get-WebSphereServerStatus $profileName $WebSphereAdministratorCredential).GetEnumerator() | % {
+            if ($_.Value) {
+                $profilePath = Get-IBMWASProfilePath $profileName
+                $serverStopped = Stop-WebSphereServerViaBatch $_.Name $profilePath $WebSphereAdministratorCredential
+                $serversStopped.Add(($_.Name), $serverStopped)
+            } else {
+                $serversStopped.Add(($_.Name), $false)
+            }
         }
     }
+
+    Return $serversStopped
 }
 
 ##############################################################################################################
@@ -1002,19 +1111,34 @@ Function Stop-AllWebSphereServers {
 ##############################################################################################################
 Function Start-AllWebSphereServers {
     [CmdletBinding(SupportsShouldProcess=$False)]
-	Param()
+	Param(
+        [parameter(Mandatory=$true, Position=0)]
+        [PSCredential] $WebSphereAdministratorCredential,
+
+        [parameter(Mandatory=$false, Position=1)]
+        [String[]] $ServersToSkip = @()
+    )
 	
-	Write-Verbose "Starting All WebSphere Servers"
-    $wasSvcName = "*" + $WAS_SVC_PREFIX + "*"
-    Get-Service -DisplayName $wasSvcName | Foreach {
-        $currSvcName = $_.DisplayName 
-        if ($_.Status -ne "Running") {
-            Write-Verbose "Starting WebSphere Server: $currSvcName via Windows Service"
-            Start-Service $_
-        } else {
-            Write-Verbose "WebSphere Server: $currSvcName. already started"
+	[hashtable] $serversStarted = @{}
+	$skipMsg = ""
+    if ($ServersToSkip.Count -gt 0) {
+        $skipMsg = ", skipping the following servers: " + ($ServersToSkip -join ', ')
+    }
+	Write-Verbose "Starting All WebSphere Servers$skipMsg"
+    Get-IBMWASProfiles | Foreach {
+        [string] $profileName = $_
+        (Get-WebSphereServerStatus $profileName $WebSphereAdministratorCredential).GetEnumerator() | % {
+            if (!($_.Value) -and !($ServersToSkip.Contains($_.Name))) {
+                $profilePath = Get-IBMWASProfilePath $profileName
+                $serverStarted = Start-WebSphereServerViaBatch $_.Name $profilePath
+                $serversStarted.Add(($_.Name), $serverStarted)
+            } else {
+                $serversStarted.Add(($_.Name), $false)
+            }
         }
     }
+
+    Return $serversStarted
 }
 
 ##############################################################################################################

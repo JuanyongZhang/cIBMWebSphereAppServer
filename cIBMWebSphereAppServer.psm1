@@ -198,11 +198,14 @@ class cIBMWebSphereAppServerFixpack {
     [DscProperty()]
     [String] $WebSphereInstallationDirectory = "C:\IBM\WebSphere\"
     
+    [DscProperty(Mandatory)]
+    [PSCredential] $WebSphereAdministratorCredential
+    
     [DscProperty()]
     [String[]] $SourcePath
     
     [DscProperty()]
-    [System.Management.Automation.PSCredential] $SourcePathCredential
+    [PSCredential] $SourcePathCredential
 
     <#
         Installs IBM WebSphere Application Server Fixpack
@@ -216,7 +219,8 @@ class cIBMWebSphereAppServerFixpack {
                     $versionObj = (New-Object -TypeName System.Version -ArgumentList $this.Version)
                     $installed = Install-IBMWebSphereAppServerFixpack -Version $versionObj `
                         -WASEdition $this.WASEdition -WebSphereInstallationDirectory $this.WebSphereInstallationDirectory `
-                        -SourcePath $this.SourcePath -SourcePathCredential $this.SourcePathCredential
+                        -SourcePath $this.SourcePath -SourcePathCredential $this.SourcePathCredential `
+                        -WebSphereAdministratorCredential $this.WebSphereAdministratorCredential
                     if ($installed) {
                         Write-Verbose ("IBM WAS Fixpack " + $this.Version + "Installed Successfully")
                     } else {
@@ -530,8 +534,8 @@ class cIBMWebSphereJVMSettings {
                             -WebSphereAdministratorCredential $this.WebSphereAdministratorCredential
                     if ($configApplied) {
                         Write-Verbose "Configuration applied successfully, restarting server"
-                        Stop-WebSphereServer $this.ServerName
-                        Start-WebSphereServer $this.ServerName
+                        Stop-WebSphereServerViaBatch $this.ServerName $profilePath $this.WebSphereAdministratorCredential
+                        Start-WebSphereServerViaBatch $this.ServerName $profilePath
                     }
                 } else {
                     Write-Error "Invalid WebSphere Profile: $profilePath"
@@ -552,7 +556,7 @@ class cIBMWebSphereJVMSettings {
         $profilePath = Get-IBMWASProfilePath $this.ProfileName
         $varData = $this.InitializeVariableData()
         if (!(Test-WebSphereServerService $this.ServerName)) {
-            Start-WebSphereServer $this.ServerName
+            Start-WebSphereServerViaBatch $this.ServerName $profilePath
         }
         $wasConfiguredCorrectly = Test-IBMWebSpherePropertyBasedConfig -ProfilePath $profilePath `
                 -VariablesMap $varData -PropertyFile $this.GetPBCTemplatePath() `
